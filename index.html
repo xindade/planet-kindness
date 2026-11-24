@@ -1,0 +1,2087 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>在一亿人中寻找友善的人</title>
+<style>
+  :root{--bg:#0b0d12;--fg:#e9ecf4;--dim:#8b93a7;--line:rgba(255,255,255,.09);--accent:#7fd1c0}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+    font:12px/1.55 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;user-select:none}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+  .panel{position:fixed;background:rgba(13,16,23,.78);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  /* stats */
+  #stats{top:14px;left:14px;width:238px}
+  #fpsbig{font-size:30px;line-height:1;font-weight:650;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+  .rows{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+  .row{display:flex;justify-content:space-between;gap:10px;color:var(--dim)}
+  .row b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
+  /* minimap */
+  #mapbox{top:14px;right:14px;padding:10px}
+  #minimap{display:block;width:176px;height:176px;border-radius:6px}
+  #mapcap{display:flex;justify-content:space-between;color:var(--dim);font-size:10px;margin-top:6px}
+  /* title */
+  #title{left:14px;bottom:14px;max-width:430px}
+  #title h1{margin:0 0 4px;font-size:15px;font-weight:600;letter-spacing:.2px}
+  #title p{margin:0;color:var(--dim);font-size:11px;line-height:1.65}
+  #keys{margin-top:9px;padding-top:8px;border-top:1px solid var(--line);color:#7c8497;font-size:10.5px;line-height:1.7}
+  kbd{display:inline-block;min-width:17px;text-align:center;padding:1px 4px;border:1px solid rgba(255,255,255,.16);
+    border-bottom-width:2px;border-radius:4px;background:rgba(255,255,255,.05);font:10px/1.4 ui-monospace,Consolas,monospace;color:#cfd6e6}
+  /* dock */
+  #dock{right:14px;bottom:14px;display:flex;flex-direction:column;gap:8px;padding:10px}
+  .seg{display:flex;flex-wrap:wrap;gap:4px;max-width:calc(100vw - 50px)}
+  .seg button{flex:1 0 auto;white-space:nowrap;font:inherit;color:var(--dim);background:rgba(255,255,255,.04);border:1px solid var(--line);
+    border-radius:7px;padding:5px 8px;cursor:pointer;transition:.15s}
+  .seg button:hover{color:var(--fg);background:rgba(255,255,255,.08)}
+  .seg button.on{color:#08110f;background:var(--accent);border-color:var(--accent);font-weight:600}
+  .seg button:disabled{opacity:.35;cursor:default}
+  .dockrow{display:flex;gap:4px}
+  .dockrow button{flex:1;font:inherit;color:var(--dim);background:rgba(255,255,255,.04);border:1px solid var(--line);
+    border-radius:7px;padding:5px 8px;cursor:pointer}
+  .dockrow button:hover{color:var(--fg);background:rgba(255,255,255,.08)}
+  /* loading */
+  #loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at 50% 45%,#12161f 0%,#080a0f 70%);z-index:50;transition:opacity .5s}
+  #loading.hide{opacity:0;pointer-events:none}
+  #loading .lt{font-size:16px;letter-spacing:.5px;margin-bottom:14px}
+  #loading .lbar{width:320px;height:3px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden}
+  #loading .lbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+  #loading .ls{margin-top:10px;color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums}
+  #err{color:#ff8a8a;max-width:520px;text-align:center;line-height:1.8}
+  #cross{position:fixed;left:50%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;
+    pointer-events:none;opacity:0;transition:opacity .18s}
+  #cross.on{opacity:.95}
+  #cross i{position:absolute;background:rgba(175,228,255,.9);box-shadow:0 0 6px rgba(120,200,255,.9)}
+  #cross i:nth-child(1){left:5px;top:0;width:2px;height:12px}
+  #cross i:nth-child(2){left:0;top:5px;width:12px;height:2px}
+  @media(max-width:580px){
+    #stats,#mapbox{width:calc(50% - 21px)}
+    #stats{padding:8px}
+    #minimap{width:100%;height:auto}
+    #title{bottom:128px;max-width:calc(100% - 28px)}
+    #dock{left:14px}
+  }
+  @media(max-height:450px) and (max-width:580px){
+    #title{display:none}
+  }
+
+#mission { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; width: min(390px, 44vw); }
+#btn-beam[aria-pressed="true"] { color: #ffe1a6; border-color: #ffe1a6; }
+#btn-audio { pointer-events: auto; font-size: 12px; }
+#mission > * { margin: 0 0 8px; }
+#mission-row { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 4px 12px; }
+#mission-row p { margin: 0; }
+#distance { font-size: clamp(15px, 2.4vw, 24px); font-weight: 650; color: #ffe1a6; font-variant-numeric: tabular-nums; }
+#precision-toast { position: absolute; z-index: 3; left: 50%; top: 26%; transform: translateX(-50%); max-width: 90vw; width: max-content; box-sizing: border-box; padding: 12px 18px; border: 1px solid #e7bd79; border-radius: 10px; background: #172334f5; color: #ffe5b5; text-align: center; pointer-events: none; }
+#message, #boundary-hint { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; }
+#message { z-index: 2; bottom: 12%; box-sizing: border-box; width: min(640px, 90vw); padding: 18px 24px; border: 2px solid #e7bd79; border-radius: 14px; background: #101c2bf5; color: #fff0cc; box-shadow: 0 0 36px #f9c76845; }
+#message strong { display: block; margin-bottom: 8px; font-size: 14px; color: #e7bd79; }
+#friend-quote { margin: 0; font-size: clamp(22px, 4vw, 32px); font-weight: 650; line-height: 1.4; }
+#crowd-bubbles { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#boundary-hint { z-index: 3; top: 55%; box-sizing: border-box; max-width: 90vw; width: max-content; padding: 10px 16px; border: 1px solid #ffd89d; border-radius: 8px; background: #292015f5; color: #ffe6be; font-weight: 600; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="crowd-bubbles" aria-hidden="true"></canvas>
+<div id="cross"><i></i><i></i></div>
+
+<div class="panel" id="stats">
+  <div id="fpsbig">– FPS</div>
+  <div class="rows">
+    <div class="row"><span>提交的人物网格</span><b id="r-detail">–</b></div>
+    <div class="row"><span>海拔</span><b id="r-alt">–</b></div>
+    <div class="row"><span>近景圆角人物</span><b id="r-close">–</b></div>
+    <div class="row"><span>帧时间</span><b id="r-ms">–</b></div>
+  </div>
+</div>
+
+<div class="panel" id="mapbox">
+  <canvas id="minimap" width="232" height="232"></canvas>
+  <div id="mapcap"><span>星球人口</span><span id="mapn">—</span></div>
+</div>
+
+<div class="panel" id="title">
+  <h1>在一亿人中寻找友善的人</h1>
+  <p>点击画面控制视角，按 <kbd>Esc</kbd> 释放鼠标。</p>
+  <p id="keys"><kbd>W A S D</kbd> 移动 <kbd>Shift</kbd> 加速 <kbd>V</kbd> 切换视角<br>
+    <kbd>R</kbd> 返回初始区域</p>
+  <button id="btn-beam" type="button" aria-pressed="false">开发者光柱 <kbd>B</kbd></button>
+</div>
+
+<div class="panel" id="mission">
+  <div id="mission-row">
+    <p id="found">已找到 0 / 10,000</p>
+    <span id="distance" hidden aria-label="友善之人的距离档位"></span>
+  </div>
+  <p id="objective" role="status">即将跳伞降落</p>
+  <button id="btn-audio" type="button" aria-pressed="false">开启声音</button>
+</div>
+<div id="precision-toast" role="status" hidden>更容易找到友善之人</div>
+<aside id="message" role="status" hidden><strong>友善之人</strong><p id="friend-quote"></p></aside>
+<div id="boundary-hint" role="status" hidden></div>
+
+<div id="loading">
+  <div class="lt">正在生成人口场…</div>
+  <div class="lbar"><i id="lbar-i"></i></div>
+  <div class="ls" id="lbar-s">初始化</div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const canvas = $('c');
+const gl = canvas.getContext('webgl2', { antialias: true, alpha: false, powerPreference: 'high-performance' });
+if (!gl) {
+  $('loading').innerHTML = '<div id="err">这个浏览器没有 WebGL2，无法运行演示。<br>请用 Chrome / Edge 打开。</div>';
+  throw new Error('no webgl2');
+}
+
+/* ---------------- 基础工具 ---------------- */
+function hash32(x) {
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  return (x ^ (x >>> 16)) >>> 0;
+}
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+/* 2D value noise */
+function vnoise(x, z, seed) {
+  const xi = Math.floor(x), zi = Math.floor(z);
+  const xf = x - xi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = zf * zf * (3 - 2 * zf);
+  const h = (i, j) => (hash32((Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(seed, 69069)) | 0) >>> 0) / 4294967295;
+  const a = h(xi, zi), b = h(xi + 1, zi), c = h(xi, zi + 1), d = h(xi + 1, zi + 1);
+  return (a + (b - a) * u) + ((c + (d - c) * u) - (a + (b - a) * u)) * v;
+}
+
+/* 列主序 4x4 */
+function m4mul(out, a, b) {
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    out[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  }
+}
+function m4perspective(fovy, aspect, near, far) {
+  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  const o = new Float32Array(16);
+  o[0] = f / aspect; o[5] = f; o[10] = (far + near) * nf; o[11] = -1; o[14] = 2 * far * near * nf;
+  return o;
+}
+function m4lookAt(eye, target, up) {
+  let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+  let l = Math.hypot(zx, zy, zz) || 1; zx /= l; zy /= l; zz /= l;
+  let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+  l = Math.hypot(xx, xy, xz) || 1; xx /= l; xy /= l; xz /= l;
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  const o = new Float32Array(16);
+  o[0] = xx; o[1] = yx; o[2] = zx; o[3] = 0;
+  o[4] = xy; o[5] = yy; o[6] = zy; o[7] = 0;
+  o[8] = xz; o[9] = yz; o[10] = zz; o[11] = 0;
+  o[12] = -(xx * eye[0] + xy * eye[1] + xz * eye[2]);
+  o[13] = -(yx * eye[0] + yy * eye[1] + yz * eye[2]);
+  o[14] = -(zx * eye[0] + zy * eye[1] + zz * eye[2]);
+  o[15] = 1;
+  return o;
+}
+/* ---------------- 世界参数 ---------------- */
+const HALF = 10000;       // 世界 ±10km
+const CELL = 100;         // 人口场格子 100m
+const CHUNK = 200;
+const NCH = 100;
+const REGION_COUNT = NCH ** 2;
+const PEOPLE_PER_REGION = 10000;
+const FOG = [0.043, 0.051, 0.066];
+
+/* ---------------- 球面化 ----------------
+   平面 (x,z) ∈ [-HALF,HALF]² 等经纬贴到球上，y 身份变成"离地高度"（alt）。
+   取 R = HALF/π，于是赤道上 1 个平面单位正好是 1 米：雾、LOD 预算、碰撞半径
+   这些用米写死的常数在赤道附近全部继续成立，一行都不用重调。
+   越靠近两极，同样的平面位移对应的弧长越短（cos(lat)），这是"极区被压缩"的来源。 */
+const R = HALF / Math.PI;          // 3183.1 m —— 球半径
+const D2R = Math.PI / HALF;        // 平面 → 经度
+const D2R2 = Math.PI / 2 / HALF;   // 平面 → 纬度
+function toSphere(x, y, z) {
+  const lon = x * D2R, lat = z * D2R2;
+  const r = R + y, cl = Math.cos(lat);
+  return [r * cl * Math.sin(lon), r * Math.sin(lat), r * cl * Math.cos(lon)];
+}
+/* 世界 → 平面（相机、LOD 判定都靠它把球面上的东西折回那张 200×200 的场） */
+function uvOf(wx, wy, wz) {
+  const r = Math.hypot(wx, wy, wz) || 1;
+  const lat = Math.atan2(wy, Math.hypot(wx, wz));
+  const lon = Math.atan2(wx, wz);
+  return [lon / D2R, lat / D2R2, r - R];
+}
+/* 球面法线（单位向量），地面与人共用 */
+function sphDir(x, z) {
+  const lon = x * D2R, lat = z * D2R2, cl = Math.cos(lat);
+  return [cl * Math.sin(lon), Math.sin(lat), cl * Math.cos(lon)];
+}
+/* 用包围球做视锥剔除（球面上一块地已经不是平面 AABB 了） */
+/* 密度场：几个 CBD + 噪声 + 河 + 公园 */
+function densityAt(x, z) {
+  const d = localDensity(x, z);
+  const edge = 1 - smoothstep(0, 700, HALF - Math.abs(x));
+  if (!edge) return d;
+  return d + (localDensity(x < 0 ? x + 2 * HALF : x - 2 * HALF, z) - d) * edge * 0.5;
+}
+
+function localDensity(x, z) {
+  const g = (cx, cz, s) => Math.exp(-((x - cx) * (x - cx) + (z - cz) * (z - cz)) / (2 * s * s));
+  let d = 0.035;
+  d += 1.00 * g(-300, 200, 2300);
+  d += 0.72 * g(-4900, 4300, 1500);
+  d += 0.58 * g(5200, -3600, 1500);
+  d += 0.42 * g(3400, 6300, 1900);
+  d += 0.26 * g(-6800, -5200, 1400);
+  d += 0.60 * vnoise(x * 0.00052, z * 0.00052, 7);
+  d += 0.24 * vnoise(x * 0.0019 + 13.7, z * 0.0019 + 5.1, 11);
+  // 河
+  const rz = 3200 * Math.sin((x + 2000) / 5200) + 1200;
+  d *= 0.04 + 0.96 * smoothstep(200, 480, Math.abs(z - rz));
+  // 公园
+  const parks = [[2500, 1200, 900], [-3200, -1800, 700], [600, -4200, 620], [5200, 4200, 800]];
+  for (let i = 0; i < parks.length; i++) {
+    const dd = Math.hypot(x - parks[i][0], z - parks[i][1]);
+    d *= 0.10 + 0.90 * smoothstep(parks[i][2] * 0.55, parks[i][2], dd);
+  }
+  return 0.24 + Math.max(0, d);
+}
+
+/* 衣服颜色（远处点云的“人群色”） */
+const PALETTE = [
+  [232, 233, 238], [72, 88, 122], [170, 66, 60], [58, 60, 68], [122, 142, 172],
+  [204, 184, 154], [62, 122, 112], [152, 122, 182], [192, 192, 196], [92, 72, 62],
+  [140, 160, 120], [210, 140, 96],
+];
+
+/* ---------------- 着色器 ---------------- */
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(s);
+    console.error(log, src);
+    throw new Error('shader: ' + log);
+  }
+  return s;
+}
+function program(vs, fs, names) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(p));
+  const u = {};
+  for (const n of names) u[n] = gl.getUniformLocation(p, n);
+  return { p, u };
+}
+
+/* 平面 (x,z) → 球面单位法线；SPH_R 是球半径。着色器里没有浮点双精度，
+   这些常数写死成 10 位有效数字，与 JS 侧的 toSphere 完全同式。 */
+const GLSL_SPH = `
+#define SPH_R   3183.0988618
+#define SPH_D2R 0.00031415926535898
+#define SPH_D2L 0.00015707963267949
+vec3 sphDir(vec2 p){
+  float lon = p.x * SPH_D2R;
+  float lat = p.y * SPH_D2L;
+  float cl = cos(lat);
+  return vec3(cl * sin(lon), sin(lat), cl * cos(lon));
+}
+`;
+
+const PROG_POINTS = program(`#version 300 es
+precision highp float;
+layout(location=0) in vec3 a_pos;
+layout(location=1) in vec4 a_col;
+uniform mat4 u_vp;
+uniform vec3 u_cam;
+uniform float u_px;
+uniform float u_near;
+uniform float u_far;
+uniform float u_size;
+out vec4 v_col;
+out float v_a;
+${GLSL_SPH}
+void main(){
+  vec3 home = a_pos;
+  vec3 wp = sphDir(home.xz) * SPH_R;
+  vec3 d = wp - u_cam;
+  float dist = length(d);
+  if (dist < u_near || dist > u_far || a_col.a == 0.0) {
+    gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+    gl_PointSize = 0.0; v_a = 0.0; v_col = vec4(0.0); return;
+  }
+  gl_Position = u_vp * vec4(wp, 1.0);
+  float s = u_size * u_px / max(dist, 1.0);
+  gl_PointSize = clamp(s, 1.0, 22.0 * u_px);
+  float a = smoothstep(u_near, u_near * 1.9, dist) * (1.0 - smoothstep(u_far * 0.72, u_far, dist));
+  /* 从轨道上看整颗球时，一千万个点会叠成一片白；按距离压一点亮度，密度结构才看得见 */
+  a *= clamp(2000.0 / max(dist, 2000.0), 0.38, 1.0);
+  v_a = a; v_col = a_col;
+}`, `#version 300 es
+precision highp float;
+in vec4 v_col;
+in float v_a;
+out vec4 o;
+void main(){
+  vec2 p = gl_PointCoord * 2.0 - 1.0;
+  float r2 = dot(p, p);
+  if (r2 > 1.0 || v_a < 0.02) discard;
+  float e = 1.0 - smoothstep(0.15, 1.0, r2);
+  o = vec4(v_col.rgb, v_col.a * v_a * (0.22 + 0.40 * e));
+}`, ['u_vp', 'u_cam', 'u_px', 'u_near', 'u_far', 'u_size']);
+
+const SPEECH_RADIUS = 22;
+const PROG_DETAIL = program(`#version 300 es
+precision highp float;
+layout(location=0) in vec3 a_pos;
+layout(location=1) in vec3 a_nrm;
+layout(location=2) in vec3 i_off;
+layout(location=3) in vec3 i_sr;
+layout(location=4) in vec3 i_col;
+layout(location=5) in float a_part;
+layout(location=6) in vec3 i_push;
+uniform mat4 u_vp;
+uniform float u_time;
+uniform vec3 u_ply;   // 玩家所在的世界坐标（第三人称时与相机不在同一点）
+out vec3 v_n;
+out vec3 v_c;
+out vec3 v_w;
+out vec3 v_p;
+out float v_part;
+out float v_var;
+${GLSL_SPH}
+vec3 rotX(vec3 p, float py, float a){
+  vec3 q = p - vec3(0.0, py, 0.0);
+  float c = cos(a), s = sin(a);
+  q = vec3(q.x, q.y * c - q.z * s, q.y * s + q.z * c);
+  return q + vec3(0.0, py, 0.0);
+}
+void main(){
+  vec3 home = i_off;
+  float rot = i_sr.y;
+  float s = i_sr.x, ph = i_sr.z;
+
+  vec3 p = a_pos;
+  vec3 localNormal = a_nrm;
+  float variant = fract(ph * 13.37);
+  // 离开近景后逐渐收起细微动作，人物站位仍和交互坐标一致。
+  vec3 surface = sphDir(home.xz);
+  vec3 foot = surface * SPH_R + i_push;
+  vec3 separation = foot - u_ply;
+  float closeness = 1.0 - smoothstep(18.0, 55.0, length(separation));
+  if (closeness > 0.0) {
+    float phase = u_time * (1.2 + variant) + ph;
+    if (a_part > 3.5) {
+      float wave = sin(phase) * 0.08;
+      if (variant > 0.85) {
+        wave += 0.45 * smoothstep(0.82, 1.0, sin(u_time * 0.55 + ph));
+      }
+      float angle = wave * closeness * (a_part < 4.5 ? 1.0 : -1.0);
+      p = rotX(p, 1.24, angle);
+      localNormal = rotX(localNormal, 0.0, angle);
+    } else if (a_part < 1.5) {
+      p.y += closeness * 0.006 * sin(phase);
+    }
+  }
+  p.x *= mix(0.78, 1.24, variant);
+  p *= s;
+  // 用三维球面距离避让，经线接缝两边的人仍然能互相看到。
+  vec3 tangent = separation - surface * dot(surface, separation);
+  float dl = length(separation);
+  float avoid = 1.0 - smoothstep(0.85, 2.60, dl);
+  vec3 n = normalize(foot + tangent * (avoid / max(dl, 0.001)));
+  float lon = home.x * SPH_D2R;
+  vec3 east = vec3(cos(lon), 0.0, -sin(lon));
+  vec3 e = normalize(east - n * dot(east, n));
+  vec3 nn = cross(n, e);
+  vec3 towardPlayer = u_ply - n * SPH_R;
+  if (length(foot - u_ply) <= float(${SPEECH_RADIUS + 2})) {
+    vec2 face = vec2(dot(towardPlayer, e), dot(towardPlayer, nn));
+    if (dot(face, face) > 0.0001) rot = atan(face.x, face.y);
+  }
+  float c = cos(rot), sn = sin(rot);
+  vec3 lx = e * (c * p.x + sn * p.z) + nn * (-sn * p.x + c * p.z);
+  vec3 w  = n * SPH_R + lx + n * p.y;
+  v_n = normalize(e * (c * localNormal.x + sn * localNormal.z) + nn * (-sn * localNormal.x + c * localNormal.z) + n * localNormal.y);
+  v_c = i_col;
+  v_w = w;
+  v_p = a_pos;                       // 原始局部坐标：用来在头上画脸/头发/帽子
+  v_part = a_part;
+  v_var = variant;
+  gl_Position = u_vp * vec4(w, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec3 v_n;
+in vec3 v_c;
+in vec3 v_w;
+in vec3 v_p;
+in float v_part;
+in float v_var;
+uniform vec3 u_cam;
+uniform vec3 u_fog;
+uniform float u_glow;
+out vec4 o;
+void main(){
+  vec3 L = normalize(vec3(0.42, 0.86, 0.28));
+  float ndl = max(dot(normalize(v_n), L), 0.0);
+  vec3 col = v_c * (0.42 + 0.72 * ndl);
+  /* ---- 只对"头"这个方块做文章：头发 / 帽子 / 表情。
+     头是 0.22 的立方，中心 y=1.50，所以 y 1.39–1.61、z ±0.11。
+     全是片元算的，不加顶点、不加缓冲、不加 draw call。 ---- */
+  if (v_part > 0.5 && v_part < 1.5) {
+    float hv = v_var;
+    /* 头发：头顶那一条，四种发色 */
+    vec3 hairC = hv < 0.25 ? vec3(0.055, 0.050, 0.048)
+               : hv < 0.55 ? vec3(0.130, 0.090, 0.060)
+               : hv < 0.80 ? vec3(0.300, 0.200, 0.100)
+               :             vec3(0.560, 0.470, 0.350);
+    vec3 skin = mix(vec3(0.31, 0.17, 0.11), vec3(0.87, 0.65, 0.48), fract(hv * 7.71));
+    col = skin * (0.43 + 0.7 * ndl);
+    if (v_p.y > 1.520 + 0.019 * sin(v_p.x * (25.0 + hv * 50.0) + hv * 9.0)) col = mix(col, hairC * (0.75 + 0.55 * ndl), 0.94);
+    /* 帽子：三成的人戴，压住整个头顶 */
+    if (hv < 0.30) {
+      vec3 hatC = hv < 0.10 ? vec3(0.45, 0.11, 0.10)
+                : hv < 0.20 ? vec3(0.11, 0.26, 0.44)
+                :             vec3(0.14, 0.14, 0.16);
+      if (v_p.y > 1.500) col = mix(col, hatC * (0.65 + 0.75 * ndl), 0.96);
+    }
+    /* 正脸细节 */
+    if (v_p.z > 0.095 && v_p.y > 1.40 && v_p.y < 1.53) {
+      float ax = abs(v_p.x);
+      float eyes = (1.0 - step(0.020, abs(v_p.y - 1.497))) * step(0.028, ax) * step(ax, 0.062);
+      col = mix(col, vec3(0.05, 0.05, 0.06), eyes * 0.92);
+      if (hv > 0.42 && hv < 0.61) {
+        vec2 lens = vec2((ax - 0.045) / 0.027, (v_p.y - 1.492) / 0.021);
+        float rim = 1.0 - smoothstep(0.18, 0.30, abs(length(lens) - 0.78));
+        float bridge = (1.0 - step(0.023, ax)) * (1.0 - step(0.004, abs(v_p.y - 1.493)));
+        col = mix(col, vec3(0.07, 0.09, 0.11), max(rim, bridge));
+      }
+      /* 嘴：中性一条 / 笑（两端上翘）/ 张（一小块） */
+      if (hv > 0.80) {
+        float open = (1.0 - step(0.018, ax)) * (1.0 - step(0.014, abs(v_p.y - 1.452)));
+        col = mix(col, vec3(0.07, 0.05, 0.05), open);
+      } else {
+        float mw = hv < 0.55 ? 0.030 : 0.040;
+        float my = 1.458 + (hv < 0.55 ? 0.0 : 0.020 * (1.0 - min(v_p.x * v_p.x / 0.0016, 1.0)));
+        float mouth = (1.0 - step(mw, ax)) * (1.0 - step(0.005, abs(v_p.y - my)));
+        col = mix(col, vec3(0.11, 0.07, 0.07), mouth);
+      }
+    }
+  }
+  float d = length(v_w - u_cam);
+  float finish = 1.0 - smoothstep(16.0, 75.0, d);
+  if (v_part < 0.5) {
+    float style = fract(v_var * 4.71);
+    float stripes = smoothstep(0.41, 0.48, fract(v_p.y * 16.0));
+    float zipper = 1.0 - smoothstep(0.004, 0.013, abs(v_p.x));
+    float pocket = (1.0 - step(0.047, abs(v_p.x - 0.102))) *
+                   (1.0 - step(0.055, abs(v_p.y - 1.13)));
+    if (style < 0.34) col *= 1.0 - stripes * 0.32 * finish;
+    if (style > 0.55 && v_p.z > 0.10) {
+      col = mix(col, vec3(0.27, 0.29, 0.33), zipper * finish * 0.67);
+      col *= 1.0 - pocket * finish * 0.16;
+    }
+    if (v_var > 0.76 && v_p.z < -0.10) {
+      float pack = (1.0 - step(0.14, abs(v_p.x))) * (1.0 - step(0.20, abs(v_p.y - 1.04)));
+      col = mix(col, vec3(0.13, 0.15, 0.18) * (0.55 + ndl), pack * finish);
+    }
+  } else if (v_part > 1.5 && v_part < 3.5) {
+    col = mix(col * 0.62, vec3(0.075, 0.08, 0.093) * (0.50 + ndl),
+              (1.0 - step(0.12, v_p.y)) * finish);
+  }
+  if (u_glow > 0.0) {
+    float lit = u_glow >= 1.0 ? 1.0 : smoothstep(1.0 - u_glow - 0.08, 1.0 - u_glow, v_p.y / 1.62);
+    vec3 gold = vec3(0.86, 0.72, 0.48) * (0.81 + 0.19 * ndl);
+    col = mix(col, gold, lit * 0.76);
+  }
+  col = mix(col, u_fog, smoothstep(230.0, 620.0, d));
+  o = vec4(col, 1.0);
+}`, ['u_vp', 'u_time', 'u_cam', 'u_ply', 'u_fog', 'u_glow']);
+
+/* 玩家化身：第三人称时用一个人形站在玩家位置，否则镜头后面只有空气。
+   复用 buildHuman() 的同一份网格，只是换一个简单的程序（一个矩阵 + 一个颜色）。 */
+const PROG_AVATAR = program(`#version 300 es
+layout(location=0) in vec3 a_pos;
+layout(location=1) in vec3 a_nrm;
+uniform mat4 u_mvp;
+uniform vec3 u_world;
+uniform vec3 u_ply;
+out vec3 v_n;
+out vec3 v_w;
+void main(){
+  v_n = a_nrm;
+  vec3 w = u_world + a_pos;
+  /* 让路：和人群那套一样，但先在切平面里量距离（3D 距离会被身高吃掉） */
+  vec3 up = normalize(w);
+  vec3 dp = w - u_ply;
+  dp -= up * dot(dp, up);
+  float dl = length(dp);
+  float nr = 1.0 - smoothstep(0.85, 2.60, dl);
+  w -= normalize(dp + vec3(1e-5)) * nr * 1.00;
+  v_w = w;                   // 够用来算雾
+  gl_Position = u_mvp * vec4(a_pos, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec3 v_n;
+in vec3 v_w;
+uniform vec3 u_cam;
+uniform vec3 u_fog;
+uniform vec3 u_tint;
+out vec4 o;
+void main(){
+  vec3 L = normalize(vec3(0.42, 0.86, 0.28));
+  float ndl = max(dot(normalize(v_n), L), 0.0);
+  vec3 col = u_tint * (0.42 + 0.72 * ndl);
+  col = mix(col, u_fog, smoothstep(230.0, 620.0, length(v_w - u_cam)));
+  o = vec4(col, 1.0);
+}`, ['u_mvp', 'u_cam', 'u_fog', 'u_world', 'u_tint', 'u_ply']);
+
+let avatarVao = null;
+const _amat = new Float32Array(16);
+
+const PROG_GROUND = program(`#version 300 es
+precision highp float;
+${GLSL_SPH}
+layout(location=0) in vec2 a_uv;
+uniform mat4 u_vp;
+out vec2 v_uv;
+out vec3 v_wp;
+void main(){
+  float lon = (a_uv.x * 2.0 - 1.0) * 3.14159265358979;
+  float lat = (a_uv.y * 2.0 - 1.0) * 1.57079632679490;
+  float cl = cos(lat);
+  vec3 n = vec3(cl * sin(lon), sin(lat), cl * cos(lon));
+  v_wp = n * SPH_R;
+  v_uv = a_uv;
+  gl_Position = u_vp * vec4(v_wp, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec3 v_wp;
+uniform vec3 u_cam;
+uniform vec3 u_sun;
+out vec4 o;
+vec3 regionColor(vec2 uv){
+  vec2 cell = clamp(floor(uv * float(${NCH})), vec2(0.0), vec2(float(${NCH - 1})));
+  float region = cell.y * float(${NCH}) + cell.x;
+  // 用互质乘数打散色调，使相邻区域在夜面也容易区分。
+  float hue = fract(region * 0.3761);
+  vec3 rgb = clamp(abs(fract(hue + vec3(0.0, 0.666667, 0.333333)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+  return vec3(0.13, 0.15, 0.20) + rgb * 0.28;
+}
+void main(){
+  vec3 n = normalize(v_wp);
+  float sh = 0.16 + 0.84 * max(dot(n, u_sun), 0.0);   // 一个太阳，背面是夜面
+  vec3 col = regionColor(v_uv) * mix(0.44, 0.84, sh);
+  /* 每格 100 m 的经纬线 */
+  vec2 g = v_uv * 200.0;
+  vec2 fw = max(fwidth(g), vec2(1e-5));
+  vec2 f = abs(fract(g + 0.5) - 0.5) / fw;
+  col += (1.0 - smoothstep(0.0, 1.4, min(f.x, f.y))) * 0.038 * sh;
+  /* 区域边界 */
+  vec2 g2 = v_uv * float(${NCH});
+  vec2 fw2 = max(fwidth(g2), vec2(1e-5));
+  vec2 f2 = abs(fract(g2 + 0.5) - 0.5) / fw2;
+  col += (1.0 - smoothstep(0.0, 1.4, min(f2.x, f2.y))) * 0.080 * sh;
+
+  /* 大气边缘辉光：视线越平，边缘越亮 */
+  vec3 vd = normalize(u_cam - v_wp);
+  float rim = pow(1.0 - abs(dot(vd, n)), 3.0);
+  col += vec3(0.085, 0.115, 0.195) * rim * max(sh, 0.25);
+  o = vec4(col, 1.0);
+}`, ['u_vp', 'u_cam', 'u_sun']);
+
+// 在人形网格外再叠加一层柔光，让光线溢出轮廓。
+const PROG_FRIEND_AURA = program(`#version 300 es
+precision highp float;
+uniform mat4 u_vp;
+uniform vec3 u_base;
+uniform vec3 u_right;
+uniform vec3 u_up;
+uniform float u_strength;
+out vec2 v_aura;
+void main(){
+  float x = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
+  float y = gl_VertexID < 2 ? -1.0 : 1.0;
+  v_aura = vec2(x, y);
+  vec3 world = u_base + u_up * (1.0 + y * (0.95 + 0.85 * u_strength))
+      + u_right * (x * (0.64 + 0.78 * u_strength));
+  gl_Position = u_vp * vec4(world, 1.0);
+}`, `#version 300 es
+precision highp float;
+uniform float u_strength;
+in vec2 v_aura;
+out vec4 o;
+void main(){
+  float radius = dot(v_aura, v_aura);
+  float edge = 1.0 - smoothstep(0.35, 1.0, radius);
+  float haze = exp(-radius * 3.8) * edge;
+  float rays = pow(abs(cos(atan(v_aura.y, v_aura.x + 0.0001) * 5.0)), 8.0)
+      * smoothstep(0.05, 0.38, radius) * edge;
+  o = vec4(1.0, 0.75, 0.39, u_strength * (haze * 0.54 + rays * 0.10));
+}`, ['u_vp', 'u_base', 'u_right', 'u_up', 'u_strength']);
+
+const PROG_BEAM = program(`#version 300 es
+precision highp float;
+uniform mat4 u_vp;
+uniform vec3 u_base;
+uniform vec3 u_right;
+uniform vec3 u_up;
+out vec2 v_beam;
+void main(){
+  float x = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
+  float y = gl_VertexID < 2 ? 0.0 : 1.0;
+  v_beam = vec2(x, y);
+  vec3 world = u_base + u_up * (0.5 + y * 125.0) + u_right * (x * 3.2);
+  gl_Position = u_vp * vec4(world, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec2 v_beam;
+out vec4 o;
+void main(){
+  float horizontal = abs(v_beam.x);
+  float core = exp(-horizontal * horizontal * 32.0);
+  float halo = 1.0 - smoothstep(0.0, 1.0, horizontal);
+  float tip = 1.0 - smoothstep(0.68, 1.0, v_beam.y);
+  o = vec4(0.95, 0.78, 0.42, (core * 0.58 + halo * 0.22) * tip);
+}`, ['u_vp', 'u_base', 'u_right', 'u_up']);
+
+/* 大气层：比地面大一圈的球，只在边缘发亮，让这颗球看起来像"有空气的行星" */
+const PROG_HALO = program(`#version 300 es
+precision highp float;
+${GLSL_SPH}
+layout(location=0) in vec2 a_uv;
+uniform mat4 u_vp;
+uniform float u_scale;
+out vec3 v_wp;
+void main(){
+  float lon = (a_uv.x * 2.0 - 1.0) * 3.14159265358979;
+  float lat = (a_uv.y * 2.0 - 1.0) * 1.57079632679490;
+  float cl = cos(lat);
+  v_wp = vec3(cl * sin(lon), sin(lat), cl * cos(lon)) * (SPH_R * u_scale);
+  gl_Position = u_vp * vec4(v_wp, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec3 v_wp;
+uniform vec3 u_cam;
+uniform vec3 u_sun;
+out vec4 o;
+void main(){
+  vec3 n = normalize(v_wp);
+  vec3 vd = normalize(u_cam - v_wp);
+  float fres = pow(clamp(1.0 - abs(dot(vd, n)), 0.0, 1.0), 2.4);
+  float lit = 0.22 + 0.78 * max(dot(n, u_sun), 0.0);
+  o = vec4(vec3(0.16, 0.36, 0.68) * fres * lit * 0.45, 1.0);
+}`, ['u_vp', 'u_cam', 'u_sun', 'u_scale']);
+
+/* ---------------- 相机：经度坐标、海拔、纬度坐标 ---------------- */
+const DEF = { pos: [100, 1.7, 300], yaw: Math.PI, pitch: -0.06 };
+
+const INTRO_DURATION = 4550;
+const INTRO_OVERVIEW = 680;
+let introStart;
+const cam = { pos: DEF.pos.slice(), yaw: DEF.yaw, pitch: -Math.PI / 2, fov: 58 * Math.PI / 180 };
+const keys = Object.create(null);
+let lastDetailPos = [1e9, 0, 0];
+
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+function chord2(a, b) {
+  return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+}
+function cross3(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function norm3(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+/* 脚下的局部坐标架：n 天顶、e 东、nn 北 */
+function surfaceBasis(x, z) {
+  const n = sphDir(x, z);
+  const longitude = x * D2R;
+  const e = [Math.cos(longitude), 0, -Math.sin(longitude)];
+  return { n, e, nn: cross3(n, e) };
+}
+function camBasis() {
+  return surfaceBasis(cam.pos[0], cam.pos[2]);
+}
+function camEye() {
+  const p = toSphere(cam.pos[0], 0, cam.pos[2]);       // 玩家脚点
+  if (camDist <= 0.01) return toSphere(cam.pos[0], cam.pos[1], cam.pos[2]);
+  /* 第三人称：站到玩家身后。抬 1.5 m 让视线越过他的肩，往下压一点才能看到脚下 */
+  const f = camDir();
+  const b = camBasis();
+  const lift = cam.pos[1] > 400 ? cam.pos[1] : 2.1;
+  /* 再往右挪一点：人站偏左，准星不被自己的后脑勺挡住 */
+  const rt = norm3(cross3(f, b.n));
+  const sd = cam.pos[1] > 400 ? 0 : 0.85;
+  return [
+    p[0] - f[0] * camDist + b.n[0] * lift + rt[0] * sd,
+    p[1] - f[1] * camDist + b.n[1] * lift + rt[1] * sd,
+    p[2] - f[2] * camDist + b.n[2] * lift + rt[2] * sd,
+  ];
+}
+/* 玩家（脚底站在球面上的那个点）。第一人称时与相机重合，
+   第三人称时相机在后面，两者分开——但"打谁、往哪飞"都以玩家为准。 */
+let plyNow = [0, 3183.0988, 0];
+function playerPoint() { return toSphere(cam.pos[0], 0, cam.pos[2]); }
+let camDist = 0;        // 第三人称距离；0 = 第一人称（默认）
+function camDir() {
+  const pit = cam.pitch, yaw = cam.yaw;
+  const cp = Math.cos(pit), b = camBasis();
+  const dx = Math.sin(yaw) * cp, dz = Math.cos(yaw) * cp, dy = Math.sin(pit);
+  return norm3([
+    b.e[0] * dx + b.nn[0] * dz + b.n[0] * dy,
+    b.e[1] * dx + b.nn[1] * dz + b.n[1] * dy,
+    b.e[2] * dx + b.nn[2] * dz + b.n[2] * dy,
+  ]);
+}
+function camView() {
+  const eye = camEye(), f = camDir(), b = camBasis();
+  // 让相机沿同一条轴抬头，垂直俯视时也不会翻转。
+  const right = b.e.map((value, i) => value * Math.cos(cam.yaw) - b.nn[i] * Math.sin(cam.yaw));
+  const up = cross3(right, f);
+  return m4lookAt(eye, [eye[0] + f[0], eye[1] + f[1], eye[2] + f[2]], up);
+}
+function jumpCamera(pos, yaw, pitch) {
+  cam.pos = pos.slice();
+  cam.yaw = yaw;
+  cam.pitch = pitch;
+  rebuildDetail(true);
+  drawWorldMap(performance.now());
+}
+
+/* ---------------- 音乐与音效 ---------------- */
+let gameAudio;
+let audioMuted = false;
+let nextMusicPhrase = 0;
+let musicPhrase = 0;
+let stepDistance = 0;
+let previousDistanceBand = null;
+let lastRangeSound = -Infinity;
+const musicChords = [
+  [45, 52, 55, 59, 64], [41, 48, 52, 55, 60],
+  [48, 55, 59, 62, 67], [43, 50, 53, 57, 62]
+];
+
+function startGameAudio() {
+  if (audioMuted || document.hidden) return;
+  const Audio = window.AudioContext || window.webkitAudioContext;
+  if (!Audio) return;
+  if (!gameAudio) {
+    const ctx = new Audio();
+    const master = ctx.createGain();
+    const music = ctx.createGain();
+    const effects = ctx.createGain();
+    master.gain.value = 0.72;
+    music.gain.value = 0.48;
+    effects.gain.value = 0.80;
+    music.connect(master);
+    effects.connect(master);
+    master.connect(ctx.destination);
+
+    const grit = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.15), ctx.sampleRate);
+    const wave = grit.getChannelData(0);
+    for (let i = 0; i < wave.length; i++) wave[i] = Math.random() * 2 - 1;
+    gameAudio = { ctx, master, music, effects, grit };
+  }
+  const { ctx } = gameAudio;
+  if (ctx.state !== 'running') ctx.resume().then(updateAudioButton, () => {});
+  else updateAudioButton();
+}
+
+function updateAudioButton() {
+  const active = !audioMuted && gameAudio?.ctx.state === 'running';
+  $('btn-audio').textContent = active ? '静音' : '开启声音';
+  $('btn-audio').setAttribute('aria-pressed', String(active));
+}
+
+$('btn-audio').addEventListener('click', () => {
+  if (!audioMuted && gameAudio?.ctx.state === 'running') {
+    audioMuted = true;
+    gameAudio.master.gain.setTargetAtTime(0, gameAudio.ctx.currentTime, 0.035);
+    updateAudioButton();
+  } else {
+    audioMuted = false;
+    startGameAudio();
+    if (gameAudio) gameAudio.master.gain.setTargetAtTime(0.72, gameAudio.ctx.currentTime, 0.035);
+  }
+});
+
+function suspendGameAudio() {
+  if (gameAudio) gameAudio.ctx.suspend().then(updateAudioButton, () => {});
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) suspendGameAudio();
+  else if (gameAudio) startGameAudio();
+});
+addEventListener('pagehide', suspendGameAudio);
+addEventListener('pageshow', () => { if (gameAudio) startGameAudio(); });
+
+function audioIsPlaying() {
+  return !document.hidden && !audioMuted && gameAudio?.ctx.state === 'running';
+}
+
+function playTone(bus, note, start, duration, volume, attack, type = 'sine') {
+  const { ctx } = gameAudio;
+  const oscillator = ctx.createOscillator();
+  const envelope = ctx.createGain();
+  oscillator.type = type;
+  oscillator.frequency.value = 440 * 2 ** ((note - 69) / 12);
+  envelope.gain.setValueAtTime(0.0001, start);
+  envelope.gain.exponentialRampToValueAtTime(volume, start + attack);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(envelope);
+  envelope.connect(bus);
+  oscillator.start(start);
+  oscillator.stop(start + duration);
+}
+
+function scheduleMusic() {
+  if (!audioIsPlaying()) return;
+  const { ctx, music } = gameAudio;
+  const now = ctx.currentTime;
+  if (nextMusicPhrase > now + 0.16) return;
+  const start = Math.max(now + 0.03, nextMusicPhrase);
+  const chord = musicChords[musicPhrase % musicChords.length];
+  for (const [i, note] of chord.entries()) {
+    playTone(music, note, start + i * 0.09, 6.7, i === 0 ? 0.12 : 0.06, 1.5, 'sine');
+  }
+  for (const [i, interval] of [2, 4, 3].entries()) {
+    playTone(music, chord[interval] + 12, start + 0.9 + i * 1.45, 2.7, 0.040, 0.06, 'triangle');
+  }
+  nextMusicPhrase = start + 5.6;
+  musicPhrase++;
+}
+
+function playFootstep() {
+  if (!audioIsPlaying()) return;
+  const { ctx, effects, grit } = gameAudio;
+  const now = ctx.currentTime;
+  const source = ctx.createBufferSource();
+  const filter = ctx.createBiquadFilter();
+  const envelope = ctx.createGain();
+  source.buffer = grit;
+  source.playbackRate.value = 0.88 + Math.random() * 0.26;
+  filter.type = 'lowpass';
+  filter.frequency.value = 650 + Math.random() * 450;
+  envelope.gain.setValueAtTime(0.001, now);
+  envelope.gain.exponentialRampToValueAtTime(0.34, now + 0.012);
+  envelope.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+  source.connect(filter);
+  filter.connect(envelope);
+  envelope.connect(effects);
+  source.start(now);
+  source.stop(now + 0.14);
+  playTone(effects, 36, now, 0.10, 0.12, 0.012);
+}
+
+function playRangeSound(t, upgraded = false) {
+  if (!audioIsPlaying() || (!upgraded && t - lastRangeSound < 550)) return;
+  lastRangeSound = t;
+  const { ctx, effects } = gameAudio;
+  const now = ctx.currentTime;
+  if (upgraded) playTone(effects, 69, now, 0.22, 0.10, 0.018);
+  playTone(effects, 76, now + (upgraded ? 0.10 : 0), 0.30, upgraded ? 0.15 : 0.085, 0.015);
+}
+
+function playDiscoverySound() {
+  if (!audioIsPlaying()) return;
+  const { ctx, effects } = gameAudio;
+  const now = ctx.currentTime;
+  const gain = gameAudio.music.gain;
+  gain.cancelScheduledValues(now);
+  gain.setTargetAtTime(0.24, now, 0.09);
+  gain.setTargetAtTime(0.48, now + 0.9, 0.35);
+  for (const [i, note] of [60, 67, 72, 76, 79].entries()) {
+    playTone(effects, note, now + i * 0.115, 1.7, 0.12, 0.045, i < 2 ? 'triangle' : 'sine');
+  }
+}
+
+let showDeveloperBeam = false;
+function toggleDeveloperBeam() {
+  showDeveloperBeam = !showDeveloperBeam;
+  $('btn-beam').setAttribute('aria-pressed', String(showDeveloperBeam));
+}
+$('btn-beam').addEventListener('click', toggleDeveloperBeam);
+
+addEventListener('keydown', (e) => {
+  if (!e.repeat && (e.target !== $('btn-audio') || (e.code !== 'Space' && e.code !== 'Enter'))) startGameAudio();
+  if (e.code === 'KeyB' && !e.repeat) toggleDeveloperBeam();
+  if (e.code === 'Space' && e.target instanceof HTMLButtonElement) return;
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.code === 'KeyV' && !landing) { camDist = camDist > 0.01 ? 0 : 6.5; rebuildDetail(true); }
+  if (e.code === 'KeyR' && !landing) jumpCamera(DEF.pos, DEF.yaw, DEF.pitch);
+});
+addEventListener('keyup', (e) => { keys[e.code] = false; });
+canvas.addEventListener('click', () => {
+  startGameAudio();
+  if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+});
+addEventListener('mousemove', (e) => {
+  if (landing || document.pointerLockElement !== canvas) return;
+  cam.yaw += e.movementX * 0.0023;
+  cam.pitch = clamp(cam.pitch - e.movementY * 0.0023, -1.45, 1.45);
+});
+document.addEventListener('pointerlockchange', () => {
+  const on = document.pointerLockElement === canvas;
+  canvas.style.cursor = on ? 'none' : 'crosshair';
+  $('cross').classList.toggle('on', on);
+
+});
+
+function moveCam(dt, t) {
+  if (landing) {
+    introStart ??= t;
+    const elapsed = t - introStart;
+    const halfFov = cam.fov / 2;
+    const fitAngle = Math.min(halfFov, Math.atan(Math.tan(halfFov) * W2 / H2)) * 0.84;
+    const overviewHeight = Math.max(7200, R * 1.035 / Math.sin(fitAngle) - R);
+    const progress = clamp((elapsed - INTRO_OVERVIEW) / (INTRO_DURATION - INTRO_OVERVIEW), 0, 1);
+    const descent = progress * progress * (2 - progress);
+    cam.pos[1] = overviewHeight * (DEF.pos[1] / overviewHeight) ** descent;
+    const lookAhead = smoothstep(0.67, 1, progress);
+    cam.pitch = -Math.PI / 2 + (DEF.pitch + Math.PI / 2) * lookAhead;
+    if (elapsed >= INTRO_DURATION) {
+      cam.pos[1] = DEF.pos[1];
+      cam.pitch = DEF.pitch;
+      landing = false;
+      updateMission();
+    }
+    return;
+  }
+  const fast = keys.ShiftLeft || keys.ShiftRight;
+  const hs = fast ? 20 : 8;
+  const fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw);
+  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+  let mx = 0, mz = 0;
+  if (keys.KeyW) { mx += fx; mz += fz; }
+  if (keys.KeyS) { mx -= fx; mz -= fz; }
+  if (keys.KeyD) { mx += rx; mz += rz; }
+  if (keys.KeyA) { mx -= rx; mz -= rz; }
+  const speed = Math.hypot(mx, mz);
+  if (speed) {
+    const { n, e, nn } = camBasis();
+    const direction = e.map((value, axis) => (value * mx + nn[axis] * mz) / speed);
+    const angle = hs * dt / R;
+    const c = Math.cos(angle), sin = Math.sin(angle);
+    // 沿大圆行走，并把朝向平行运输到新位置；过极点时相机不会掉头。
+    const next = n.map((value, axis) => value * c + direction[axis] * sin);
+    const nextDirection = direction.map((value, axis) => value * c - n[axis] * sin);
+    const forward = e.map((value, axis) => value * fx + nn[axis] * fz);
+    const component = dot3(forward, direction);
+    const nextForward = forward.map((value, axis) => value + (nextDirection[axis] - direction[axis]) * component);
+    const [x, z] = uvOf(...next);
+    if (!canEnter(regionAt(x, z))) {
+      const hint = $('boundary-hint');
+      const inSearchRegion = regionAt(cam.pos[0], cam.pos[2]) === currentFriend?.region;
+      const text = inSearchRegion ? '请先找到这个区域的友善之人' : '请先前往已解锁的区域，找到那里的友善之人';
+      if (hint.textContent !== text) hint.textContent = text;
+      hint.hidden = false;
+      boundaryUntil = t + 1800;
+      return;
+    }
+    cam.pos[0] = x;
+    cam.pos[2] = z;
+    stepDistance += hs * dt;
+    const stride = fast ? 4.5 : 2.65;
+    if (stepDistance >= stride) {
+      stepDistance %= stride;
+      playFootstep();
+    }
+    const basis = camBasis();
+    cam.yaw = Math.atan2(dot3(nextForward, basis.e), dot3(nextForward, basis.nn));
+  }
+}
+
+/* ---------------- 场景对象 ---------------- */
+let posBuf = null, colBuf = null, pointsVao = null;
+let pointCount = 0, pointStarts = null;
+let pointColors;
+let chunkCenters = null;
+let detailVao = [], detailBufs = [], detailCounts = [], detailCount = 0;
+let detailMeta = [];
+let closeVao = [], closeCounts = [], closeCount = 0;
+const N = REGION_COUNT * PEOPLE_PER_REGION;
+let starts;
+const POINT_BUDGET = 140000;
+const DETAIL_BUDGET = 12000;
+const CLOSE_BUDGET = 320;
+const CLOSE_RADIUS = 42;
+
+let baseMeshVbo = null, meshVertCount = 0;
+let closeMeshVbo = null, detailMeshCount = 0;
+const FOGV = new Float32Array(FOG);
+const SUN = norm3([-0.55, 0.42, 0.72]);   // 太阳方向（世界里定死，夜面就是背光那半颗球）
+
+/* 天空 */
+/* 天空 = 星空。用相机的基向量反推每个像素的世界方向，所以星星是"定在天上"的：
+   转视角时它们会跟着走，而不是糊在屏幕上。 */
+const PROG_SKY = program(`#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_uv;
+uniform vec3 u_right, u_up, u_fwd;
+uniform float u_tan, u_aspect;
+out vec3 v_dir;
+void main(){
+  vec2 p = a_uv * 2.0 - 1.0;
+  v_dir = normalize(u_fwd + u_right * (p.x * u_aspect * u_tan) + u_up * (p.y * u_tan));
+  gl_Position = vec4(p, 0.9999, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec3 v_dir;
+uniform vec3 u_sun;
+out vec4 o;
+
+float h21(vec2 p){ p = fract(p * vec2(127.1, 311.7)); p += dot(p, p.yx + 34.23); return fract(p.x * p.y); }
+vec3 h33(vec3 p){
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.xxy + p.yxx) * p.zyx);
+}
+float vnoise3(vec3 p){
+  vec3 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = h33(i).x,               b = h33(i + vec3(1.0,0.0,0.0)).x;
+  float c = h33(i + vec3(0.0,1.0,0.0)).x, d = h33(i + vec3(1.0,1.0,0.0)).x;
+  float e = h33(i + vec3(0.0,0.0,1.0)).x, f2 = h33(i + vec3(1.0,0.0,1.0)).x;
+  float g = h33(i + vec3(0.0,1.0,1.0)).x, h = h33(i + vec3(1.0,1.0,1.0)).x;
+  return mix(mix(mix(a,b,f.x), mix(c,d,f.x), f.y), mix(mix(e,f2,f.x), mix(g,h,f.x), f.y), f.z);
+}
+/* 立方体面上撒点：每个格子最多一颗星，x = 亮度，y = 色温 */
+vec2 stars(vec3 d, float N, float thr, float size){
+  vec3 a = abs(d);
+  vec2 uv; float face;
+  if (a.x >= a.y && a.x >= a.z)      { uv = d.yz / a.x; face = d.x > 0.0 ? 1.0 : 2.0; }
+  else if (a.y >= a.z)               { uv = d.xz / a.y; face = d.y > 0.0 ? 3.0 : 4.0; }
+  else                               { uv = d.xy / a.z; face = d.z > 0.0 ? 5.0 : 6.0; }
+  vec2 g = (uv * 0.5 + 0.5) * N;
+  vec2 id = floor(g);
+  vec3 r = h33(vec3(id, face * 13.7));
+  if (r.z < thr) return vec2(0.0);
+  vec2 sp = vec2(0.24) + 0.52 * r.xy;
+  float dd = length(g - id - sp);
+  return vec2(smoothstep(size, 0.0, dd) * (0.22 + 0.78 * r.z), r.x);
+}
+
+void main(){
+  vec3 d = normalize(v_dir);
+  float sd = dot(d, u_sun);
+  /* 底色：极深的蓝黑，往天顶再压一点，接近太阳那头微微发暖 */
+  vec3 col = mix(vec3(0.010, 0.012, 0.024), vec3(0.005, 0.007, 0.016), smoothstep(-0.6, 1.0, d.y));
+  col += vec3(0.030, 0.026, 0.020) * pow(max(sd, 0.0), 6.0) * 0.6;
+  /* 银河带：一条斜跨的宽带，用两层噪声咬出絮状结构 */
+  vec3 bandN = normalize(vec3(0.62, 0.34, -0.70));
+  float band = exp(-pow(dot(d, bandN) / 0.40, 2.0));
+  if (band > 0.015) {
+    float neb = vnoise3(d * 3.1) * 0.62 + vnoise3(d * 7.9 + 11.0) * 0.38;
+    col += vec3(0.115, 0.108, 0.225) * band * (0.20 + 0.80 * neb);
+    col += vec3(0.075, 0.105, 0.165) * band * pow(neb, 3.0) * 2.2;
+  }
+  /* 贴地时地平线上方那层薄雾：让天空和地面接得住 */
+  col += vec3(0.042, 0.052, 0.080) * pow(max(0.0, 1.0 - abs(d.y) * 5.0), 3.0) * 0.55;
+  /* 三层星，密度/大小/阈值都不同 */
+  vec2 s1 = stars(d, 44.0, 0.800, 0.058);
+  vec2 s2 = stars(d, 98.0, 0.860, 0.048);
+  vec2 s3 = stars(d, 220.0, 0.905, 0.040);
+  vec3 starCol = vec3(0.74, 0.83, 1.0);
+  vec3 warm = vec3(1.0, 0.88, 0.72);
+  float st = 0.0, tint = 0.0;
+  if (s1.x > st) { st = s1.x * 1.35; tint = s1.y; }
+  st += s2.x * 0.70; tint += s2.y * 0.35;
+  st += s3.x * 0.34; tint += s3.y * 0.25;
+  col += mix(starCol, warm, clamp(tint, 0.0, 1.0)) * st;
+  /* 那颗给地面打光的太阳：本影之外还有一圈晕 */
+  float disc = smoothstep(0.99970, 0.99993, sd);
+  float glow = pow(max(sd, 0.0), 300.0) * 0.75 + pow(max(sd, 0.0), 16.0) * 0.055;
+  col += vec3(1.0, 0.96, 0.88) * (disc * 5.0 + glow);
+  o = vec4(col, 1.0);
+}`, ['u_right', 'u_up', 'u_fwd', 'u_tan', 'u_aspect', 'u_sun']);
+
+const skyVao = gl.createVertexArray();
+gl.bindVertexArray(skyVao);
+{
+  const b = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+}
+gl.bindVertexArray(null);
+
+/* 地面 */
+/* 地面：一颗等经纬网格球（经度 256 × 纬度 128），顶点只存 (u,v)，位置在 VS 里算 */
+const GLON = 256, GLAT = 128;
+const groundVao = gl.createVertexArray();
+let groundIdxCount = 0;
+gl.bindVertexArray(groundVao);
+{
+  const verts = new Float32Array((GLON + 1) * (GLAT + 1) * 2);
+  let k = 0;
+  for (let j = 0; j <= GLAT; j++) for (let i = 0; i <= GLON; i++) {
+    verts[k++] = i / GLON; verts[k++] = j / GLAT;
+  }
+  const idx = new Uint32Array(GLON * GLAT * 6);
+  let m = 0;
+  for (let j = 0; j < GLAT; j++) for (let i = 0; i < GLON; i++) {
+    const a = i + j * (GLON + 1), b = a + 1, c = a + GLON + 1, d = c + 1;
+    idx[m++] = a; idx[m++] = c; idx[m++] = b;
+    idx[m++] = b; idx[m++] = c; idx[m++] = d;
+  }
+  groundIdxCount = idx.length;
+  const b = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const ib = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+}
+gl.bindVertexArray(null);
+
+/* 两档共用尺寸与部位号。近景分割每个面，圆角与法线在建模时生成。 */
+const PART = { TORSO: 0, HEAD: 1, LEG_L: 2, LEG_R: 3, ARM_L: 4, ARM_R: 5 };
+function buildHuman(rounded = false) {
+  const v = [], n = [], pt = [];
+  function box(w, h, d, cx, cy, cz, part) {
+    const x0 = cx - w / 2, x1 = cx + w / 2, y0 = cy - h / 2, y1 = cy + h / 2, z0 = cz - d / 2, z1 = cz + d / 2;
+    const faces = [
+      [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1]],
+      [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1]],
+      [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0]],
+      [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0]],
+      [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0]],
+      [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0]],
+    ];
+    for (const f of faces) {
+      const [a, b, c, d2, nn] = f;
+      if (!rounded) {
+        v.push(...a, ...b, ...c, ...a, ...c, ...d2);
+        for (let i = 0; i < 6; i++) { n.push(...nn); pt.push(part); }
+        continue;
+      }
+      const radius = Math.min(w, h, d) * (part === PART.HEAD ? 0.24 : 0.18);
+      const uLength = Math.hypot(...b.map((value, axis) => value - a[axis]));
+      const vLength = Math.hypot(...d2.map((value, axis) => value - a[axis]));
+      const uStops = [0, radius / uLength, 1 - radius / uLength, 1];
+      const vStops = [0, radius / vLength, 1 - radius / vLength, 1];
+      const low = [x0 + radius, y0 + radius, z0 + radius];
+      const high = [x1 - radius, y1 - radius, z1 - radius];
+      const grid = [];
+      for (const tv of vStops) {
+        for (const tu of uStops) {
+          const outer = a.map((value, axis) => value + (b[axis] - value) * tu + (d2[axis] - value) * tv);
+          const inside = outer.map((value, axis) => clamp(value, low[axis], high[axis]));
+          const normal = norm3(outer.map((value, axis) => value - inside[axis]));
+          grid.push({ position: inside.map((value, axis) => value + radius * normal[axis]), normal });
+        }
+      }
+      for (let row = 0; row < 3; row++) {
+        for (let column = 0; column < 3; column++) {
+          const i = row * 4 + column;
+          for (const k of [i, i + 1, i + 5, i, i + 5, i + 4]) {
+            v.push(...grid[k].position);
+            n.push(...grid[k].normal);
+            pt.push(part);
+          }
+        }
+      }
+    }
+  }
+  box(0.40, 0.58, 0.24, 0, 1.06, 0, PART.TORSO);
+  box(0.22, 0.22, 0.22, 0, 1.50, 0, PART.HEAD);
+  box(0.15, 0.74, 0.20, -0.10, 0.37, 0, PART.LEG_L);
+  box(0.15, 0.74, 0.20, 0.10, 0.37, 0, PART.LEG_R);
+  box(0.09, 0.52, 0.15, -0.26, 1.04, 0, PART.ARM_L);
+  box(0.09, 0.52, 0.15, 0.26, 1.04, 0, PART.ARM_R);
+  /* 顶点交错成 [px,py,pz, nx,ny,nz, part]，与 VAO 的 stride=28 一致 */
+  const vc = v.length / 3;
+  const arr = new Float32Array(vc * 7);
+  for (let i = 0; i < vc; i++) {
+    arr[i * 7 + 0] = v[i * 3 + 0]; arr[i * 7 + 1] = v[i * 3 + 1]; arr[i * 7 + 2] = v[i * 3 + 2];
+    arr[i * 7 + 3] = n[i * 3 + 0]; arr[i * 7 + 4] = n[i * 3 + 1]; arr[i * 7 + 5] = n[i * 3 + 2];
+    arr[i * 7 + 6] = pt[i];
+  }
+  return arr;
+}
+
+/* 基准小人网格上传一次，所有实例共用 */
+{
+  const mesh = buildHuman();
+  const rounded = buildHuman(true);
+  meshVertCount = mesh.length / 7;
+  detailMeshCount = rounded.length / 7;
+  closeMeshVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, closeMeshVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, rounded, gl.STATIC_DRAW);
+  baseMeshVbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, baseMeshVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  /* 玩家化身用自己的 VAO，但共用同一份网格缓冲 */
+  avatarVao = gl.createVertexArray();
+  gl.bindVertexArray(avatarVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, baseMeshVbo);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 28, 12);
+  gl.bindVertexArray(null);
+}
+
+/* ---------------- 人口场生成 ---------------- */
+
+function regionAt(x, z) {
+  const column = Math.floor((x + HALF) / CHUNK) % NCH;
+  const row = clamp(Math.floor((z + HALF) / CHUNK), 0, NCH - 1);
+  return row * NCH + column;
+}
+
+function buildRegionRoute(initialRegion) {
+  const route = [];
+  // 蛇形走过第 1 至 99 列，再用第 0 列接回起点，形成沿边相邻的闭环。
+  for (let row = 0; row < NCH; row++) {
+    for (let i = 1; i < NCH; i++) {
+      route.push(row * NCH + (row % 2 ? NCH - i : i));
+    }
+  }
+  for (let row = NCH - 1; row >= 0; row--) route.push(row * NCH);
+  const start = route.indexOf(initialRegion);
+  return route.slice(start).concat(route.slice(0, start));
+}
+
+function precisionForRegion(number) {
+  return number < 3 ? 100 : Math.max(20, 50 - (number - 3) * 10);
+}
+
+function distanceBand(meters, precision = distancePrecision) {
+  return clamp(Math.ceil(meters / precision) * precision, precision, 300);
+}
+
+const regionRoute = buildRegionRoute(regionAt(DEF.pos[0], DEF.pos[2]));
+const completedRegions = new Uint8Array(REGION_COUNT);
+const abuseThemes = [
+  { name: '群体起哄', remarks: ['大家都这么说，就你不认。', '都在笑你，你还当真？', '跟着说两句而已。'], reply: '人多，也不能把伤害说成对。' },
+  { name: '外貌羞辱', remarks: ['这张照片你也敢发？', '你的样子就够人笑了。', '先照照镜子，再发言吧。'], reply: '你有权被尊重，无论你长什么样。' },
+  { name: '恶意揣测', remarks: ['说这些，不就是想博关注？', '我看你从一开始就是故意的。', '不用听解释，我知道你怎么想的。'], reply: '他们的猜测，不能替你定义动机。' },
+  { name: '否定能力', remarks: ['就这水平，还好意思发？', '你怎么做都没用。', '出过一次错，你就不行。'], reply: '一次失误，抹不掉你的努力。' },
+  { name: '责怪受害者', remarks: ['怕被骂就别发出来。', '连这都受不了？', '说两句而已，是你太敏感。'], reply: '你觉得受伤很正常。错在伤害你的人。' },
+  { name: '扭曲原话', remarks: ['只截这一句就够了。', '别看全文，反正意思都一样。', '后面怎么解释都没用。'], reply: '断章取义的一句，代表不了你的原意。' }
+];
+let boundaryUntil = 0;
+const regionThemes = new Uint8Array(REGION_COUNT);
+regionRoute.forEach((region, index) => { regionThemes[region] = index % abuseThemes.length; });
+let foundCount = 0;
+let distancePrecision = 100;
+let precisionToastUntil = 0;
+let landing = true;
+let messageUntil = 0;
+let currentFriend = makeFriend(regionRoute[0]);
+const foundFriends = [];
+let friendVao, friendBuffer;
+
+function canEnter(region) {
+  return completedRegions[region] === 1 || region === currentFriend?.region;
+}
+
+// 每区有固定的 10,000 个序号，最后一个留给友善之人。
+function personPosition(region, idx, out, offset = 0, margin = 0) {
+  const ordinal = idx - region * PEOPLE_PER_REGION;
+  const seed = hash32(Math.imul(region + 1, 0x85ebca6b) ^ ordinal);
+  const x = margin + (1 - 2 * margin) * hash32(seed ^ 0x632be59b) / 4294967296;
+  const z = margin + (1 - 2 * margin) * hash32(seed ^ 0xb3da3c2d) / 4294967296;
+  out[offset] = (region % NCH + x) * CHUNK - HALF;
+  out[offset + 1] = (Math.floor(region / NCH) + z) * CHUNK - HALF;
+  return out;
+}
+
+function makeFriend(region) {
+  const idx = (region + 1) * PEOPLE_PER_REGION - 1;
+  const [x, z] = personPosition(region, idx, [], 0, 0.16);
+  return { region, x, z, ground: toSphere(x, 0, z), glow: 0 };
+}
+
+function updateMission() {
+  $('found').textContent = '已找到 ' + fmt(foundCount) + ' / 10,000';
+  $('objective').textContent = !currentFriend ? '你找齐了所有友善之人' :
+    foundCount ? '友善之人 · 估算距离' : '在初始区域寻找第一位友善之人，留意微光';
+  $('distance').hidden = !foundCount || !currentFriend;
+}
+
+function stepMission(t) {
+  if (t >= precisionToastUntil) $('precision-toast').hidden = true;
+  if (t >= boundaryUntil) $('boundary-hint').hidden = true;
+  if (t >= messageUntil) $('message').hidden = true;
+  if (landing || !currentFriend) return;
+  if (regionAt(cam.pos[0], cam.pos[2]) === currentFriend.region) {
+    const precision = precisionForRegion(foundCount + 1);
+    if (precision < distancePrecision) {
+      distancePrecision = precision;
+      previousDistanceBand = null;
+      playRangeSound(t, true);
+      $('precision-toast').hidden = false;
+      precisionToastUntil = t + 2600;
+    }
+  }
+  const chord = Math.sqrt(chord2(playerPoint(), currentFriend.ground));
+  const meters = 2 * R * Math.asin(Math.min(1, chord / (2 * R)));
+  currentFriend.glow = 1 - smoothstep(2.3, 28, meters);
+  if (meters <= 2.3 && regionAt(cam.pos[0], cam.pos[2]) === currentFriend.region) {
+    const region = currentFriend.region;
+    completedRegions[region] = 1;
+    currentFriend.glow = 1;
+    foundFriends.push(currentFriend);
+    const first = pointStarts[region] * 4;
+    const end = pointStarts[region + 1] * 4;
+    for (let i = first + 3; i < end; i += 4) pointColors[i] = 0;
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, first, pointColors.subarray(first, end));
+    $('mapn').textContent = fmt(N - (foundCount + 1) * (PEOPLE_PER_REGION - 1)) + ' 人';
+    const theme = abuseThemes[regionThemes[region]];
+    $('friend-quote').textContent = '“' + theme.reply + '”';
+    $('boundary-hint').hidden = true;
+    $('message').hidden = false;
+    messageUntil = t + 5200;
+    foundCount++;
+    previousDistanceBand = null;
+    playDiscoverySound();
+    currentFriend = foundCount < regionRoute.length ? makeFriend(regionRoute[foundCount]) : null;
+    rebuildDetail(true);
+    updateMission();
+  }
+  if (foundCount && currentFriend) {
+    const nextChord = Math.sqrt(chord2(playerPoint(), currentFriend.ground));
+    const band = distanceBand(2 * R * Math.asin(Math.min(1, nextChord / (2 * R))));
+    if (previousDistanceBand !== null && band < previousDistanceBand) playRangeSound(t);
+    previousDistanceBand = band;
+    const label = band + ' 米';
+    if ($('distance').textContent !== label) $('distance').textContent = label;
+  }
+}
+
+async function generate() {
+  progress(0.12, '划分 10,000 个区域');
+  await tick();
+  starts = Uint32Array.from({ length: REGION_COUNT + 1 }, (_, i) => i * PEOPLE_PER_REGION);
+  chunkCenters = Array.from({ length: REGION_COUNT }, (_, i) =>
+    toSphere((i % NCH + 0.5) * CHUNK - HALF, 0, (Math.floor(i / NCH) + 0.5) * CHUNK - HALF));
+  pointStarts = Uint32Array.from({ length: REGION_COUNT + 1 }, (_, i) => Math.round(i * POINT_BUDGET / REGION_COUNT));
+  pointCount = POINT_BUDGET;
+  progress(0.62, '生成远景采样');
+  const pos = new Float32Array(pointCount * 3);
+  const col = pointColors = new Uint8Array(pointCount * 4);
+  const xz = [0, 0];
+  for (let ci = 0; ci < REGION_COUNT; ci++) {
+    for (let j = pointStarts[ci]; j < pointStarts[ci + 1]; j++) {
+      const idx = starts[ci] + j - pointStarts[ci];
+      personPosition(ci, idx, xz);
+      pos[j * 3] = xz[0];
+      pos[j * 3 + 2] = xz[1];
+      const h = personStyle(idx);
+      const pal = PALETTE[(h >>> 4) % PALETTE.length];
+      col[j * 4] = pal[0];
+      col[j * 4 + 1] = pal[1];
+      col[j * 4 + 2] = pal[2];
+      col[j * 4 + 3] = 255;
+    }
+  }
+
+  if (!pointsVao) {
+    pointsVao = gl.createVertexArray();
+    posBuf = gl.createBuffer();
+    colBuf = gl.createBuffer();
+  }
+  gl.bindVertexArray(pointsVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+  gl.bindVertexArray(null);
+  progress(1, '完成');
+  $('mapn').textContent = fmt(N) + ' 人';
+  drawWorldMap(performance.now());
+}
+
+function personStyle(idx) {
+  return hash32(Math.imul(idx, 0x9e3779b1));
+}
+
+function progress(f, text) {
+  $('lbar-i').style.width = (f * 100).toFixed(1) + '%';
+  $('lbar-s').textContent = text || '';
+}
+const tick = () => new Promise(r => requestAnimationFrame(() => r()));
+const fmt = v => Math.round(v).toLocaleString('en-US');
+
+/* ---------------- 近景实例化 ---------------- */
+function crowdVao(mesh, first, instance, push) {
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 28, 12);
+  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 1, gl.FLOAT, false, 28, 24);
+  gl.bindBuffer(gl.ARRAY_BUFFER, instance);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 36, first * 36); gl.vertexAttribDivisor(2, 1);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, 36, first * 36 + 12); gl.vertexAttribDivisor(3, 1);
+  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 3, gl.FLOAT, false, 36, first * 36 + 24); gl.vertexAttribDivisor(4, 1);
+  gl.bindBuffer(gl.ARRAY_BUFFER, push);
+  gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 3, gl.FLOAT, false, 12, first * 12); gl.vertexAttribDivisor(6, 1);
+  gl.bindVertexArray(null);
+  return vao;
+}
+
+let detailAirborne = false;
+function rebuildDetail(force) {
+  if (!starts) return;
+  const center = playerPoint();
+  const airborne = cam.pos[1] > 620;
+  if (!force && airborne === detailAirborne && (airborne || chord2(center, lastDetailPos) < 26 ** 2)) return;
+  detailAirborne = airborne;
+  lastDetailPos = center;
+  for (const v of detailVao) if (v) gl.deleteVertexArray(v);
+  for (const v of closeVao) if (v) gl.deleteVertexArray(v);
+  closeVao = []; closeCounts = []; closeCount = 0;
+  for (const b of detailBufs) gl.deleteBuffer(b);
+  detailVao = []; detailBufs = []; detailCounts = []; detailCount = 0; detailMeta = [];
+  if (airborne) return;
+
+  const list = [];
+  let requested = 0;
+  for (let ci = 0; ci < chunkCenters.length; ci++) {
+    if (completedRegions[ci]) continue;
+    const d2 = chord2(center, chunkCenters[ci]);
+    if (d2 >= 320 ** 2) continue;
+    const d = Math.sqrt(d2);
+    const latitude = (Math.floor(ci / NCH) * CHUNK + CHUNK / 2 - HALF) * D2R2;
+    const limit = Math.round((900 + 2300 * (1 - d / 320)) * Math.cos(latitude));
+    const reserve = pointStarts[ci + 1] - pointStarts[ci];
+    const take = Math.min(PEOPLE_PER_REGION - 1, Math.max(reserve, limit));
+    if (!take) continue;
+    list.push({ ci, take, d2 });
+    requested += take;
+  }
+  list.sort((a, b) => a.d2 - b.d2);
+  let cumulative = 0, previous = 0;
+  for (const item of list) {
+    cumulative += item.take;
+    const quota = Math.round(cumulative * Math.min(1, DETAIL_BUDGET / requested));
+    item.take = quota - previous;
+    previous = quota;
+  }
+
+  for (const item of list) {
+    if (!item.take) continue;
+    const s0 = starts[item.ci];
+    const arr = new Float32Array(item.take * 9);
+    const xyz = new Float32Array(item.take * 3);
+    const pushArr = new Float32Array(item.take * 3);
+    const positions = new Float32Array(item.take * 2);
+    const nearby = [];
+    const speechStyles = new Uint32Array(item.take);
+    const heights = new Float32Array(item.take);
+    for (let j = 0; j < item.take; j++) {
+      personPosition(item.ci, s0 + j, positions, j * 2);
+      if (closeCount >= CLOSE_BUDGET) continue;
+      const d2 = chord2(center, toSphere(positions[j * 2], 0, positions[j * 2 + 1]));
+      if (d2 < CLOSE_RADIUS ** 2) nearby.push({ j, d2 });
+    }
+    nearby.sort((a, b) => a.d2 - b.d2);
+    const close = nearby.slice(0, CLOSE_BUDGET - closeCount);
+    const closeOrdinals = new Set(close.map(candidate => candidate.j));
+    const ordinals = close.map(candidate => candidate.j);
+    for (let j = 0; j < item.take; j++) if (!closeOrdinals.has(j)) ordinals.push(j);
+    let k = 0;
+    for (let j = 0; j < item.take; j++) {
+      const ordinal = ordinals[j];
+      const idx = s0 + ordinal;
+      arr[k] = positions[ordinal * 2];
+      arr[k + 2] = positions[ordinal * 2 + 1];
+      xyz.set(toSphere(arr[k], 0, arr[k + 2]), j * 3);
+      const h = personStyle(idx);
+      speechStyles[j] = h;
+      arr[k + 3] = heights[j] = 0.92 + (h & 255) / 255 * 0.20;         // 身高
+      arr[k + 4] = ((h >>> 8) & 1023) / 1024 * Math.PI * 2; // 朝向
+      arr[k + 5] = ((h >>> 18) & 255) / 255 * 6.283;        // 相位
+      const pal = PALETTE[(h >>> 4) % PALETTE.length];
+      const jj = 0.85 + ((h >>> 12) & 63) / 63 * 0.3;
+      arr[k + 6] = clamp(pal[0] * jj, 0, 255) / 255;
+      arr[k + 7] = clamp(pal[1] * jj, 0, 255) / 255;
+      arr[k + 8] = clamp(pal[2] * jj, 0, 255) / 255;
+      k += 9;
+    }
+    const vb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+    detailBufs.push(vb);
+
+    const pb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, pb);
+    gl.bufferData(gl.ARRAY_BUFFER, pushArr, gl.DYNAMIC_DRAW);
+    detailBufs.push(pb);
+
+    detailVao.push(close.length < item.take ? crowdVao(baseMeshVbo, close.length, vb, pb) : null);
+    detailCounts.push(item.take - close.length);
+    closeVao.push(close.length ? crowdVao(closeMeshVbo, 0, vb, pb) : null);
+    closeCounts.push(close.length);
+    closeCount += close.length;
+    detailMeta.push({ region: item.ci, n: item.take, xyz, heights, speechStyles, center: chunkCenters[item.ci], push: pushArr, buf: pb });
+    detailCount += item.take;
+  }
+}
+
+/* ---------------- 近处贴身避让 ---------------- */
+const COL_R = 62;        // 解算半径（米）
+/* ?nocol 关掉避让，用来量"不避让时会重叠多少人" */
+const NOCOL = new URLSearchParams(location.search).has('nocol');
+const COL_FADE = 22;     // 边缘淡出带宽
+const COL_CELL = 1.6;    // 哈希网格边长
+const COL_G = 120;       // 网格格数（120×1.6 = 192 m，容得下 2×84 m）
+/* ?sep=2.5 可以把"个人空间"调大，用来压测避让解算器（默认 0.92 m 肩宽） */
+const COL_SEP = +new URLSearchParams(location.search).get('sep') || 0.92;    // 期望最小间距
+const COL_CAP = 20000;
+const cellHead = new Int32Array(COL_G * COL_G);
+const nextIn = new Int32Array(COL_CAP);
+const colPX = new Float32Array(COL_CAP), colPZ = new Float32Array(COL_CAP);
+const colBX = new Float32Array(COL_CAP), colBZ = new Float32Array(COL_CAP);
+const colCI = new Int32Array(COL_CAP), colK = new Int32Array(COL_CAP);
+const colHit = new Uint8Array(COL_CAP);
+let colN = 0, colStats = { n: 0, pairs: 0, ms: 0 };
+const activeCol = [];
+
+function stepCollision() {
+  const t0 = performance.now();
+  if (!detailMeta.length) { colStats.n = 0; colStats.ms = 0; return; }
+  const center = playerPoint();
+  const { e, nn } = camBasis();
+  const RR = COL_R + COL_FADE, RR2 = RR * RR;
+  const gx0 = -COL_G * COL_CELL * 0.5, gz0 = gx0;
+  const inv = 1 / COL_CELL;
+
+  // 在玩家脚下的切平面上解算碰撞，结果以三维位移传回着色器。
+  colN = 0;
+  activeCol.length = 0;
+  const chunkLim = RR + 150;
+  for (let ci = 0; ci < detailMeta.length; ci++) {
+    const m = detailMeta[ci];
+    if (chord2(m.center, center) > chunkLim ** 2) continue;
+    activeCol.push(ci);
+    const pu = m.push;
+    for (let k = 0; k < m.n; k++) {
+      const i = k * 3;
+      const dx = m.xyz[i] - center[0], dy = m.xyz[i + 1] - center[1], dz = m.xyz[i + 2] - center[2];
+      if (dx * dx + dy * dy + dz * dz > RR2 || colN >= COL_CAP) {
+        pu[i] *= 0.85; pu[i + 1] *= 0.85; pu[i + 2] *= 0.85;
+        continue;
+      }
+      colBX[colN] = dx * e[0] + dy * e[1] + dz * e[2];
+      colBZ[colN] = dx * nn[0] + dy * nn[1] + dz * nn[2];
+      colPX[colN] = colBX[colN] + pu[i] * e[0] + pu[i + 1] * e[1] + pu[i + 2] * e[2];
+      colPZ[colN] = colBZ[colN] + pu[i] * nn[0] + pu[i + 1] * nn[1] + pu[i + 2] * nn[2];
+      colCI[colN] = ci; colK[colN] = k; colHit[colN] = 0;
+      colN++;
+    }
+  }
+  if (!colN) { colStats.n = 0; colStats.ms = performance.now() - t0; return; }
+  colStats.n = colN;
+
+  /* 2) 哈希网格：每格一条链表（格数不多，fill(-1) 比排序便宜） */
+  cellHead.fill(-1);
+  for (let i = 0; i < colN; i++) {
+    const gx = clamp(((colPX[i] - gx0) * inv) | 0, 0, COL_G - 1);
+    const gz = clamp(((colPZ[i] - gz0) * inv) | 0, 0, COL_G - 1);
+    const gi = gx + gz * COL_G;
+    nextIn[i] = cellHead[gi];
+    cellHead[gi] = i;
+  }
+
+  /* 3) 位置松弛（6 遍 Gauss-Seidel）：重叠的一对各自让开，解到刚贴住 SEP 为止；
+        解出来的位移就是"为了不穿模而偏离纯轨道的量"，它才是真正被上传的东西。 */
+  let pairs = 0, hits = 0;
+  const sep2 = COL_SEP * COL_SEP;
+  const sepDeep = (COL_SEP - 0.15) * (COL_SEP - 0.15); let deep = 0;
+  const ITER = 6;
+  for (let it = 0; it < ITER; it++) {
+    for (let i = 0; i < colN; i++) {
+      const px = colPX[i], pz = colPZ[i];
+      const gx = clamp(((px - gx0) * inv) | 0, 0, COL_G - 1);
+      const gz = clamp(((pz - gz0) * inv) | 0, 0, COL_G - 1);
+      let tx = 0, tz = 0, hit = false, cnt = 0;
+      for (let oz = -1; oz <= 1; oz++) {
+        const zz = gz + oz; if (zz < 0 || zz >= COL_G) continue;
+        for (let ox = -1; ox <= 1; ox++) {
+          const xx = gx + ox; if (xx < 0 || xx >= COL_G) continue;
+          let j = cellHead[xx + zz * COL_G];
+          while (j >= 0) {
+            if (j !== i) {
+              const dx = px - colPX[j], dz = pz - colPZ[j];
+              const d2 = dx * dx + dz * dz;
+              pairs++;
+              if (d2 < sep2) {
+                hit = true; cnt++; if (it === 0 && d2 < sepDeep) deep++;
+                const d = Math.sqrt(d2);
+                if (d > 1e-4) {
+                  const f = (COL_SEP - d) / d;
+                  tx += dx * f; tz += dz * f;
+                } else { tx += 0.4; tz += 0.4; }
+              }
+            }
+            j = nextIn[j];
+          }
+        }
+      }
+      if (hit) {
+        if (it === 0) { hits += cnt; colHit[i] = 1; }
+        if (!NOCOL) { colPX[i] = px + tx * 0.75; colPZ[i] = pz + tz * 0.75; }
+      }
+    }
+  }
+  for (let i = 0; i < colN; i++) {
+    const m = detailMeta[colCI[i]], pu = m.push, b = colK[i] * 3;
+    let ox = colPX[i] - colBX[i], oz = colPZ[i] - colBZ[i];
+    if (!colHit[i]) { ox *= 0.93; oz *= 0.93; }   // 周围没人了，慢慢回纯轨道
+    ox = clamp(ox, -1.4, 1.4);
+    oz = clamp(oz, -1.4, 1.4);
+    for (let axis = 0; axis < 3; axis++) pu[b + axis] = e[axis] * ox + nn[axis] * oz;
+  }
+  colStats.pairs = pairs; colStats.hits = hits; colStats.deep = deep;
+  let mp = 0;
+  for (let i = 0; i < colN; i++) {
+    const m = detailMeta[colCI[i]], pu = m.push, b = colK[i] * 3;
+    mp = Math.max(mp, Math.abs(pu[b]), Math.abs(pu[b + 2]));
+  }
+  colStats.maxPush = +mp.toFixed(3);
+
+  /* 4) 把位移传回 GPU（只传被解算到的块） */
+  for (const ci of activeCol) {
+    const m = detailMeta[ci];
+    gl.bindBuffer(gl.ARRAY_BUFFER, m.buf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, m.push);
+  }
+  colStats.ms = performance.now() - t0;
+}
+
+const bubbleCanvas = $('crowd-bubbles');
+const bubbleContext = bubbleCanvas.getContext('2d');
+let dpr = 1, W2 = 1, H2 = 1;
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 1.5);
+  W2 = Math.floor(innerWidth * dpr); H2 = Math.floor(innerHeight * dpr);
+  canvas.width = bubbleCanvas.width = W2;
+  canvas.height = bubbleCanvas.height = H2;
+}
+addEventListener('resize', resize);
+resize();
+
+let last = performance.now(), acc = 0, frames = 0, fps = 0, msAvg = 0;
+
+function frame(t) {
+  const elapsed = Math.max(0, (t - last) / 1000) || 0.016;
+  const dt = Math.min(0.06, elapsed);
+  last = t;
+  scheduleMusic();
+  moveCam(dt, t);
+  stepMission(t);
+  rebuildDetail(false);
+  stepCollision();
+
+  const aspect = W2 / H2;
+  const eye = camEye();
+  // 第三人称用稍大的视野。
+  const fovUse = camDist > 0.01 ? 70 * Math.PI / 180 : cam.fov;
+  const proj = m4perspective(fovUse, aspect, 0.5, Math.max(40000, cam.pos[1] + 3 * R));
+  const view = camView();
+  const vp = new Float32Array(16);
+  m4mul(vp, proj, view);
+  plyNow = playerPoint();
+
+  gl.viewport(0, 0, W2, H2);
+  gl.clearColor(FOG[0], FOG[1], FOG[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  gl.disable(gl.CULL_FACE);
+  gl.disable(gl.BLEND);
+
+  // 星空：从视图矩阵反推右/上/前三个基向量，逐像素算世界方向
+  gl.depthMask(false);
+  gl.useProgram(PROG_SKY.p);
+  gl.uniform3f(PROG_SKY.u.u_right, view[0], view[4], view[8]);
+  gl.uniform3f(PROG_SKY.u.u_up, view[1], view[5], view[9]);
+  gl.uniform3f(PROG_SKY.u.u_fwd, -view[2], -view[6], -view[10]);
+  gl.uniform1f(PROG_SKY.u.u_tan, Math.tan(fovUse / 2));
+  gl.uniform1f(PROG_SKY.u.u_aspect, aspect);
+  gl.uniform3fv(PROG_SKY.u.u_sun, SUN);
+  gl.bindVertexArray(skyVao);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+  gl.depthMask(true);
+
+  // 地面（球）
+  gl.useProgram(PROG_GROUND.p);
+  gl.uniformMatrix4fv(PROG_GROUND.u.u_vp, false, vp);
+  gl.uniform3fv(PROG_GROUND.u.u_cam, eye);
+  gl.uniform3fv(PROG_GROUND.u.u_sun, SUN);
+  gl.bindVertexArray(groundVao);
+  gl.drawElements(gl.TRIANGLES, groundIdxCount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+
+  // 大气边缘（加色，只亮在球的轮廓外圈）——贴地时跳过，人就在大气里面
+  if (cam.pos[1] > 260) {
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.depthMask(false);
+  gl.useProgram(PROG_HALO.p);
+  gl.uniformMatrix4fv(PROG_HALO.u.u_vp, false, vp);
+  gl.uniform3fv(PROG_HALO.u.u_cam, eye);
+  gl.uniform3fv(PROG_HALO.u.u_sun, SUN);
+  /* 贴地时人在大气层里面，不该再看到"从外面看球"的那圈辉光（否则整个地面被刷白） */
+  gl.uniform1f(PROG_HALO.u.u_scale, 1.035);
+  gl.bindVertexArray(groundVao);
+  gl.drawElements(gl.TRIANGLES, groundIdxCount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+  }
+
+  const nearbyFriends = [];
+  if (currentFriend && chord2(plyNow, currentFriend.ground) <= 230 ** 2) nearbyFriends.push(currentFriend);
+  for (const friend of foundFriends) {
+    if (chord2(plyNow, friend.ground) <= 230 ** 2) nearbyFriends.push(friend);
+  }
+  // 近景小人
+  let calls = 1;
+  {
+    gl.useProgram(PROG_DETAIL.p);
+    gl.uniformMatrix4fv(PROG_DETAIL.u.u_vp, false, vp);
+    gl.uniform1f(PROG_DETAIL.u.u_time, t / 1000);
+    gl.uniform3fv(PROG_DETAIL.u.u_cam, eye);
+    gl.uniform3fv(PROG_DETAIL.u.u_fog, FOGV);
+    gl.uniform3fv(PROG_DETAIL.u.u_ply, plyNow);
+    gl.uniform1f(PROG_DETAIL.u.u_glow, 0);
+    for (let i = 0; i < detailVao.length; i++) {
+      if (detailVao[i]) {
+        gl.bindVertexArray(detailVao[i]);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, meshVertCount, detailCounts[i]);
+        calls++;
+      }
+      if (closeVao[i]) {
+        gl.bindVertexArray(closeVao[i]);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, detailMeshCount, closeCounts[i]);
+        calls++;
+      }
+    }
+    for (const friend of nearbyFriends) {
+      const local = surfaceBasis(friend.x, friend.z);
+      const facing = plyNow.map((v, i) => v - friend.ground[i]);
+      const yaw = Math.atan2(dot3(facing, local.e), dot3(facing, local.nn));
+      gl.bindBuffer(gl.ARRAY_BUFFER, friendBuffer);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array([
+        friend.x, 0, friend.z, 1, yaw, 0, 0.31, 0.40, 0.38
+      ]));
+      gl.uniform1f(PROG_DETAIL.u.u_glow, friend.glow);
+      gl.bindVertexArray(friendVao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, detailMeshCount, 1);
+      calls++;
+    }
+    gl.bindVertexArray(null);
+  }
+
+  // 点云（加色混合：密集处自然发亮）
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.depthMask(false);
+  gl.useProgram(PROG_POINTS.p);
+  gl.uniformMatrix4fv(PROG_POINTS.u.u_vp, false, vp);
+  gl.uniform3fv(PROG_POINTS.u.u_cam, eye);
+  gl.uniform1f(PROG_POINTS.u.u_px, dpr);
+  gl.uniform1f(PROG_POINTS.u.u_near, 90);
+  gl.uniform1f(PROG_POINTS.u.u_far, 30000);
+  gl.uniform1f(PROG_POINTS.u.u_size, cam.pos[1] > 620 ? 2400 : 1250);
+  gl.bindVertexArray(pointsVao);
+  gl.drawArrays(gl.POINTS, 0, pointCount);
+  gl.bindVertexArray(null);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+
+  for (const friend of nearbyFriends) {
+    const { ground, x, z, glow } = friend;
+    if (glow <= 0 || chord2(plyNow, ground) > 40 ** 2) continue;
+    const { n, e } = surfaceBasis(x, z);
+    const side = cross3(n, eye.map((value, i) => value - ground[i]));
+    const right = Math.hypot(...side) < 0.001 ? e : norm3(side);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.depthMask(false);
+    gl.useProgram(PROG_FRIEND_AURA.p);
+    gl.uniformMatrix4fv(PROG_FRIEND_AURA.u.u_vp, false, vp);
+    gl.uniform3fv(PROG_FRIEND_AURA.u.u_base, ground);
+    gl.uniform3fv(PROG_FRIEND_AURA.u.u_right, right);
+    gl.uniform3fv(PROG_FRIEND_AURA.u.u_up, n);
+    gl.uniform1f(PROG_FRIEND_AURA.u.u_strength, Math.sqrt(glow));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    calls++;
+  }
+
+  if (showDeveloperBeam && currentFriend) {
+    const { ground, x, z } = currentFriend;
+    const { n, e } = surfaceBasis(x, z);
+    const side = cross3(n, eye.map((value, i) => value - ground[i]));
+    const right = Math.hypot(...side) < 0.001 ? e : norm3(side);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.depthMask(false);
+    gl.useProgram(PROG_BEAM.p);
+    gl.uniformMatrix4fv(PROG_BEAM.u.u_vp, false, vp);
+    gl.uniform3fv(PROG_BEAM.u.u_base, ground);
+    gl.uniform3fv(PROG_BEAM.u.u_right, right);
+    gl.uniform3fv(PROG_BEAM.u.u_up, n);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+    calls++;
+  }
+
+  if (avatarVao && camDist > 0.01 && cam.pos[1] < 400) {
+    const b = camBasis();
+    const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+    const X = [b.e[0] * cy - b.nn[0] * sy, b.e[1] * cy - b.nn[1] * sy, b.e[2] * cy - b.nn[2] * sy];
+    const Z = [b.e[0] * sy + b.nn[0] * cy, b.e[1] * sy + b.nn[1] * cy, b.e[2] * sy + b.nn[2] * cy];
+    const P = plyNow;
+    _amat[0] = X[0]; _amat[1] = X[1]; _amat[2] = X[2]; _amat[3] = 0;
+    _amat[4] = b.n[0]; _amat[5] = b.n[1]; _amat[6] = b.n[2]; _amat[7] = 0;
+    _amat[8] = Z[0]; _amat[9] = Z[1]; _amat[10] = Z[2]; _amat[11] = 0;
+    _amat[12] = P[0]; _amat[13] = P[1]; _amat[14] = P[2]; _amat[15] = 1;
+    const amvp = new Float32Array(16);
+    m4mul(amvp, vp, _amat);
+    gl.useProgram(PROG_AVATAR.p);
+    gl.uniformMatrix4fv(PROG_AVATAR.u.u_mvp, false, amvp);
+    gl.uniform3fv(PROG_AVATAR.u.u_cam, eye);
+    gl.uniform3fv(PROG_AVATAR.u.u_fog, FOGV);
+    gl.uniform3fv(PROG_AVATAR.u.u_world, P);
+    gl.uniform3f(PROG_AVATAR.u.u_tint, 0.62, 0.34, 0.26);
+    gl.uniform3fv(PROG_AVATAR.u.u_ply, plyNow);
+    gl.bindVertexArray(avatarVao);
+    gl.drawArrays(gl.TRIANGLES, 0, meshVertCount);
+    gl.bindVertexArray(null);
+  }
+
+  frames++; acc += elapsed; msAvg = msAvg * 0.9 + elapsed * 1000 * 0.1;
+  if (acc >= 0.5) { fps = frames / acc; frames = 0; acc = 0; }
+  drawCrowdBubbles(vp, t);
+  drawWorldMap(t);
+
+  $('fpsbig').textContent = fps.toFixed(0) + ' FPS';
+  $('r-detail').textContent = fmt(detailCount);
+  $('r-close').textContent = fmt(closeCount);
+  $('r-alt').textContent = cam.pos[1] >= 1000
+    ? (cam.pos[1] / 1000).toFixed(2) + ' km'
+    : Math.round(cam.pos[1]).toLocaleString('en-US') + ' m';
+  $('r-ms').textContent = msAvg.toFixed(1) + ' ms';
+
+  window.__bench = {
+    fps: +fps.toFixed(1), ms: +msAvg.toFixed(2), people: N, points: pointCount,
+    detail: detailCount, close: closeCount, calls: calls + 1,
+    colN: colStats.n, colMs: +colStats.ms.toFixed(2),
+  };
+  requestAnimationFrame(frame);
+}
+
+/* ---------------- 头顶对白 ---------------- */
+function drawCrowdBubbles(vp, t) {
+  const c = bubbleContext;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const width = W2 / dpr, height = H2 / dpr;
+  c.clearRect(0, 0, width, height);
+  if (landing) return;
+
+  const candidates = [];
+  for (const group of detailMeta) {
+    if (completedRegions[group.region] || chord2(plyNow, group.center) > 170 ** 2) continue;
+    const remarks = abuseThemes[regionThemes[group.region]].remarks;
+    for (let i = 0; i < group.n; i++) {
+      const j = i * 3;
+      const bx = group.xyz[j], by = group.xyz[j + 1], bz = group.xyz[j + 2];
+      const dx = bx - plyNow[0], dy = by - plyNow[1], dz = bz - plyNow[2];
+      const distanceSquared = dx * dx + dy * dy + dz * dz;
+      if (distanceSquared > SPEECH_RADIUS ** 2 || distanceSquared < 0.8 ** 2) continue;
+
+      // 使用角色的避让位移，把气泡投影到头顶。
+      const distance = Math.sqrt(distanceSquared);
+      const avoid = (1 - smoothstep(0.85, 2.60, distance)) / distance;
+      const scale = 1 + group.heights[i] * 1.72 / R;
+      const x = bx * scale + dx * avoid + group.push[j];
+      const y = by * scale + dy * avoid + group.push[j + 1];
+      const z = bz * scale + dz * avoid + group.push[j + 2];
+      const w = vp[3] * x + vp[7] * y + vp[11] * z + vp[15];
+      if (w <= 0.5) continue;
+      const sx = (1 + (vp[0] * x + vp[4] * y + vp[8] * z + vp[12]) / w) * width / 2;
+      const sy = (1 - (vp[1] * x + vp[5] * y + vp[9] * z + vp[13]) / w) * height / 2;
+      if (sx < 0 || sx > width || sy < 29 || sy > height) continue;
+      const style = group.speechStyles[i];
+      const line = Math.floor((t + (style >>> 8) % 4200) / 4200);
+      candidates.push({ x: sx, y: sy, distanceSquared, text: remarks[(style + line) % remarks.length] });
+    }
+  }
+
+  candidates.sort((a, b) => a.distanceSquared - b.distanceSquared);
+  c.font = '13px system-ui, sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  const boxes = [];
+  for (const speech of candidates) {
+    const w = c.measureText(speech.text).width + 16;
+    const left = speech.x - w / 2, top = speech.y - 28;
+    if (left < 2 || left + w > width - 2) continue;
+    if (boxes.some(b => left < b.left + b.w + 4 && left + w + 4 > b.left &&
+      top < b.top + 29 && top + 29 > b.top)) continue;
+    boxes.push({ left, top, w });
+    c.fillStyle = 'rgba(39, 26, 34, .92)';
+    c.strokeStyle = 'rgba(207, 160, 172, .63)';
+    c.beginPath();
+    c.roundRect(left, top, w, 22, 5);
+    c.fill();
+    c.stroke();
+    c.beginPath();
+    c.moveTo(speech.x - 4, top + 21);
+    c.lineTo(speech.x + 4, top + 21);
+    c.lineTo(speech.x, speech.y);
+    c.fill();
+    c.fillStyle = '#f3dce1';
+    c.fillText(speech.text, speech.x, top + 11);
+  }
+}
+
+/* ---------------- 小地图 ---------------- */
+const MAP_SUBDIVISIONS = 5;
+const map = $('minimap');
+const mapContext = map.getContext('2d');
+function minimapLayout(region, expanded) {
+  const count = expanded ? 3 : 1;
+  const offset = expanded ? 1 : 0;
+  return {
+    count,
+    left: region % NCH - offset,
+    top: clamp(Math.floor(region / NCH) - offset, 0, NCH - count)
+  };
+}
+
+function drawMinimapArrow(c, x, y, heading, size, color) {
+  c.save();
+  c.translate(x, y);
+  c.rotate(heading);
+  c.beginPath();
+  c.moveTo(0, -size);
+  c.lineTo(size * 0.63, size * 0.72);
+  c.lineTo(0, size * 0.38);
+  c.lineTo(-size * 0.63, size * 0.72);
+  c.closePath();
+  c.fillStyle = color;
+  c.strokeStyle = '#101720';
+  c.lineWidth = 2;
+  c.stroke();
+  c.fill();
+  c.restore();
+}
+
+function drawWorldMap(t) {
+  const c = mapContext, s = map.width;
+  const [x, , z] = cam.pos;
+  const region = regionAt(x, z);
+  const next = foundCount ? currentFriend?.region : undefined;
+  const expanded = next !== undefined && completedRegions[region] === 1;
+  const { count, left, top } = minimapLayout(region, expanded);
+  const tile = s / count;
+  const pulse = (1 + Math.sin(t * 0.008)) / 2;
+  c.clearRect(0, 0, s, s);
+
+  let nextVisible = false;
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      const id = (top + row) * NCH + (left + col + NCH) % NCH;
+      const tileX = col * tile, tileY = (count - 1 - row) * tile;
+      c.fillStyle = completedRegions[id] ? '#37917e' : id === region ? '#354c60' : '#253443';
+      c.fillRect(tileX, tileY, tile, tile);
+      if (expanded && id === next) {
+        nextVisible = true;
+        c.fillStyle = `rgba(255, 194, 91, ${0.26 + pulse * 0.56})`;
+        c.fillRect(tileX, tileY, tile, tile);
+      }
+      c.strokeStyle = 'rgba(235, 245, 255, .26)';
+      c.lineWidth = 1;
+      c.beginPath();
+      for (let i = 1; i < MAP_SUBDIVISIONS; i++) {
+        const offset = tile * i / MAP_SUBDIVISIONS;
+        c.moveTo(tileX + offset, tileY);
+        c.lineTo(tileX + offset, tileY + tile);
+        c.moveTo(tileX, tileY + offset);
+        c.lineTo(tileX + tile, tileY + offset);
+      }
+      c.stroke();
+      c.strokeStyle = '#111c26';
+      c.lineWidth = 2;
+      c.strokeRect(tileX + 1, tileY + 1, tile - 2, tile - 2);
+    }
+  }
+
+  const gridX = ((x + HALF) / CHUNK) % NCH;
+  const gridY = (z + HALF) / CHUNK;
+  const mapX = ((gridX - left + NCH) % NCH) * tile;
+  const mapY = s - (gridY - top) * tile;
+  if (expanded && !nextVisible) {
+    const dx = (next % NCH + 0.5 - gridX + NCH * 1.5) % NCH - NCH / 2;
+    const dy = gridY - (Math.floor(next / NCH) + 0.5);
+    const edge = Math.max(Math.abs(dx), Math.abs(dy));
+    drawMinimapArrow(c, s / 2 + dx / edge * (s / 2 - 11), s / 2 + dy / edge * (s / 2 - 11),
+      Math.atan2(dx, -dy), 8, `rgba(255, 194, 91, ${0.45 + pulse * 0.55})`);
+  }
+  // 北朝上，东西向按纬度换算到地图坐标。
+  c.font = 'bold 13px system-ui, sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.lineWidth = 3;
+  c.strokeStyle = '#101720';
+  c.fillStyle = '#f4fbff';
+  for (const [label, x, y] of [['北', s / 2, 11], ['东', s - 11, s / 2], ['南', s / 2, s - 11], ['西', 11, s / 2]]) {
+    c.strokeText(label, x, y);
+    c.fillText(label, x, y);
+  }
+  const heading = Math.atan2(Math.sin(cam.yaw), 2 * Math.cos(z * D2R2) * Math.cos(cam.yaw));
+  drawMinimapArrow(c, clamp(mapX, 10, s - 10), clamp(mapY, 10, s - 10), heading, 11, '#f4fbff');
+}
+
+async function boot() {
+  const t0 = performance.now();
+  await generate();
+  window.__genMs = Math.round(performance.now() - t0);
+  friendBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, friendBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, 36, gl.DYNAMIC_DRAW);
+  const push = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, push);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(3), gl.STATIC_DRAW);
+  friendVao = crowdVao(closeMeshVbo, 0, friendBuffer, push);
+  $('loading').classList.add('hide');
+  requestAnimationFrame(frame);
+  window.__ready = true;
+  window.__readyMs = Math.round(performance.now() - t0);
+}
+
+boot().catch(err => {
+  console.error(err);
+  $('loading').textContent = '生成失败：' + err.message;
+});
+</script>
+</body>
+</html>
