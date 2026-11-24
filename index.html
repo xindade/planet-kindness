@@ -75,6 +75,12 @@
 #game-menu section { width: min(380px, 86vw); display: grid; gap: 12px; text-align: center; }
 #game-menu h1 { font-size: clamp(20px, 5vw, 29px); margin: 0 0 16px; }
 #game-menu button { padding: 11px 18px; font-size: 16px; }
+#population-options { margin: 0 0 10px; padding: 10px; border: 1px solid #627b916b; border-radius: 10px; }
+#population-options legend { padding: 0 8px; color: #d3e1e9; }
+#population-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+#population-options button { padding: 7px 11px; font-size: 14px; }
+#population-options button[aria-pressed="true"] { border-color: #e7bd79; color: #ffe5b5; }
+#population-note { margin: 8px 0 0; color: #c5d4df; font-size: 12px; }
 #game-menu button:disabled { opacity: .48; cursor: default; }
 #menu-status { color: #efd1a1; margin: 0; }
 #btn-exit { pointer-events: auto; margin-left: 6px; font-size: 12px; }
@@ -116,7 +122,7 @@
 <div class="panel" id="title">
   <h1>在一亿人中寻找声援者</h1>
   <p>点击画面控制视角，按 <kbd>Esc</kbd> 释放鼠标。</p>
-  <p id="keys"><kbd>W A S D</kbd> 移动<br>
+  <p id="keys"><kbd>W A S D</kbd> 移动 <kbd>空格</kbd> 跳跃<br>
     <kbd>R</kbd> 返回初始区域</p>
 </div>
 
@@ -136,6 +142,15 @@
 <div id="game-menu" hidden>
   <section aria-labelledby="menu-title">
     <h1 id="menu-title">在一亿人中寻找声援者</h1>
+    <fieldset id="population-options">
+      <legend>星球人口</legend>
+      <div id="population-buttons">
+        <button type="button" data-people="1000" aria-pressed="false">1000 万</button>
+        <button type="button" data-people="5000" aria-pressed="false">5000 万</button>
+        <button type="button" data-people="10000" aria-pressed="true">1 亿</button>
+      </div>
+      <p id="population-note">每区 10,000 人 · 含 1 位声援者</p>
+    </fieldset>
     <button id="btn-start" type="button">开始游戏</button>
     <button id="btn-continue" type="button" disabled>继续游戏</button>
     <p id="menu-status" role="status" hidden></p>
@@ -167,15 +182,6 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
 /* 2D value noise */
-function vnoise(x, z, seed) {
-  const xi = Math.floor(x), zi = Math.floor(z);
-  const xf = x - xi, zf = z - zi;
-  const u = xf * xf * (3 - 2 * xf), v = zf * zf * (3 - 2 * zf);
-  const h = (i, j) => (hash32((Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(seed, 69069)) | 0) >>> 0) / 4294967295;
-  const a = h(xi, zi), b = h(xi + 1, zi), c = h(xi, zi + 1), d = h(xi + 1, zi + 1);
-  return (a + (b - a) * u) + ((c + (d - c) * u) - (a + (b - a) * u)) * v;
-}
-
 /* 列主序 4x4 */
 function m4mul(out, a, b) {
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
@@ -205,12 +211,16 @@ function m4lookAt(eye, target, up) {
   return o;
 }
 /* ---------------- 世界参数 ---------------- */
-const HALF = 10000;       // 世界 ±10km
-const CELL = 100;         // 人口场格子 100m
-const CHUNK = 200;
+const PLANET_SCALE = Math.sqrt(5);
+const HALF = 10000 * PLANET_SCALE; // 经纬坐标的半幅
+const CHUNK = 200 * PLANET_SCALE;
+const REGION_BOUND_RADIUS = Math.hypot(CHUNK / 2, CHUNK / 4);
 const NCH = 100;
 const REGION_COUNT = NCH ** 2;
-const PEOPLE_PER_REGION = 10000;
+const POPULATION_OPTIONS = [1000, 5000, 10000];
+const DEFAULT_REGION_POPULATION = 10000;
+let peoplePerRegion = DEFAULT_REGION_POPULATION;
+let selectedPopulation = DEFAULT_REGION_POPULATION;
 const FOG = [0.043, 0.051, 0.066];
 
 /* ---------------- 球面化 ----------------
@@ -218,7 +228,7 @@ const FOG = [0.043, 0.051, 0.066];
    取 R = HALF/π，于是赤道上 1 个平面单位正好是 1 米：雾、LOD 预算、碰撞半径
    这些用米写死的常数在赤道附近全部继续成立，一行都不用重调。
    越靠近两极，同样的平面位移对应的弧长越短（cos(lat)），这是"极区被压缩"的来源。 */
-const R = HALF / Math.PI;          // 3183.1 m —— 球半径
+const R = HALF / Math.PI;          // 球半径，单位为米
 const D2R = Math.PI / HALF;        // 平面 → 经度
 const D2R2 = Math.PI / 2 / HALF;   // 平面 → 纬度
 function toSphere(x, y, z) {
@@ -240,36 +250,6 @@ function sphDir(x, z) {
 }
 /* 用包围球做视锥剔除（球面上一块地已经不是平面 AABB 了） */
 /* 密度场：几个 CBD + 噪声 + 河 + 公园 */
-function densityAt(x, z) {
-  const d = localDensity(x, z);
-  const edge = 1 - smoothstep(0, 700, HALF - Math.abs(x));
-  if (!edge) return d;
-  return d + (localDensity(x < 0 ? x + 2 * HALF : x - 2 * HALF, z) - d) * edge * 0.5;
-}
-
-function localDensity(x, z) {
-  const g = (cx, cz, s) => Math.exp(-((x - cx) * (x - cx) + (z - cz) * (z - cz)) / (2 * s * s));
-  let d = 0.035;
-  d += 1.00 * g(-300, 200, 2300);
-  d += 0.72 * g(-4900, 4300, 1500);
-  d += 0.58 * g(5200, -3600, 1500);
-  d += 0.42 * g(3400, 6300, 1900);
-  d += 0.26 * g(-6800, -5200, 1400);
-  d += 0.60 * vnoise(x * 0.00052, z * 0.00052, 7);
-  d += 0.24 * vnoise(x * 0.0019 + 13.7, z * 0.0019 + 5.1, 11);
-  // 河
-  const rz = 3200 * Math.sin((x + 2000) / 5200) + 1200;
-  d *= 0.04 + 0.96 * smoothstep(200, 480, Math.abs(z - rz));
-  // 公园
-  const parks = [[2500, 1200, 900], [-3200, -1800, 700], [600, -4200, 620], [5200, 4200, 800]];
-  for (let i = 0; i < parks.length; i++) {
-    const dd = Math.hypot(x - parks[i][0], z - parks[i][1]);
-    d *= 0.10 + 0.90 * smoothstep(parks[i][2] * 0.55, parks[i][2], dd);
-  }
-  return 0.24 + Math.max(0, d);
-}
-
-/* 衣服颜色（远处点云的“人群色”） */
 const PALETTE = [
   [232, 233, 238], [72, 88, 122], [170, 66, 60], [58, 60, 68], [122, 142, 172],
   [204, 184, 154], [62, 122, 112], [152, 122, 182], [192, 192, 196], [92, 72, 62],
@@ -298,12 +278,11 @@ function program(vs, fs, names) {
   return { p, u };
 }
 
-/* 平面 (x,z) → 球面单位法线；SPH_R 是球半径。着色器里没有浮点双精度，
-   这些常数写死成 10 位有效数字，与 JS 侧的 toSphere 完全同式。 */
+/* 平面 (x,z) → 球面单位法线，着色器和 JavaScript 共用球面参数。 */
 const GLSL_SPH = `
-#define SPH_R   3183.0988618
-#define SPH_D2R 0.00031415926535898
-#define SPH_D2L 0.00015707963267949
+#define SPH_R   ${R.toFixed(10)}
+#define SPH_D2R ${D2R.toPrecision(16)}
+#define SPH_D2L ${D2R2.toPrecision(16)}
 vec3 sphDir(vec2 p){
   float lon = p.x * SPH_D2R;
   float lat = p.y * SPH_D2L;
@@ -353,6 +332,50 @@ void main(){
   float e = 1.0 - smoothstep(0.15, 1.0, r2);
   o = vec4(v_col.rgb, v_col.a * v_a * (0.22 + 0.40 * e));
 }`, ['u_vp', 'u_cam', 'u_px', 'u_near', 'u_far', 'u_size']);
+
+const PROG_CROWD_SILHOUETTES = program(`#version 300 es
+precision highp float;
+layout(location=0) in vec4 i_crowd;
+uniform mat4 u_vp;
+uniform vec3 u_cam;
+out vec2 v_shape;
+out float v_tint;
+out float v_distance;
+out float v_light;
+${GLSL_SPH}
+void main(){
+  float x = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
+  float y = gl_VertexID < 2 ? 0.0 : 1.0;
+  vec3 n = sphDir(i_crowd.xy);
+  vec3 ground = n * SPH_R;
+  vec3 side = cross(n, u_cam - ground);
+  vec3 east = vec3(cos(i_crowd.x * SPH_D2R), 0.0, -sin(i_crowd.x * SPH_D2R));
+  side = length(side) > 0.001 ? normalize(side) : east;
+  vec3 world = ground + side * (x * 0.32) + n * (0.035 + y * i_crowd.z);
+  v_shape = vec2(x, y);
+  v_tint = i_crowd.w;
+  v_distance = distance(u_cam, ground);
+  v_light = 0.5 + 0.5 * max(dot(n, normalize(vec3(-0.55, 0.42, 0.72))), 0.0);
+  gl_Position = u_vp * vec4(world, 1.0);
+}`, `#version 300 es
+precision highp float;
+in vec2 v_shape;
+in float v_tint;
+in float v_distance;
+in float v_light;
+uniform vec3 u_fog;
+out vec4 o;
+void main(){
+  vec2 p = v_shape;
+  bool head = length((p - vec2(0.0, 0.895)) / vec2(0.34, 0.10)) < 1.0;
+  bool body = p.y > 0.43 && p.y < 0.81 && abs(p.x) < mix(0.40, 0.62, (p.y - 0.43) / 0.38);
+  bool arms = p.y > 0.46 && p.y < 0.75 && abs(abs(p.x) - 0.60) < 0.14;
+  bool legs = p.y < 0.48 && abs(abs(p.x) - 0.22) < 0.18;
+  if (!(head || body || arms || legs)) discard;
+  vec3 coat = mix(vec3(0.19, 0.29, 0.37), vec3(0.48, 0.34, 0.29), v_tint);
+  vec3 tint = (head ? vec3(0.53, 0.41, 0.34) : legs ? coat * 0.66 : coat) * v_light;
+  o = vec4(mix(tint, u_fog, smoothstep(120.0, 420.0, v_distance)), 1.0);
+}`, ['u_vp', 'u_cam', 'u_fog']);
 
 const SPEECH_RADIUS = 22;
 const PROG_DETAIL = program(`#version 300 es
@@ -598,25 +621,31 @@ uniform vec3 u_right;
 uniform vec3 u_up;
 uniform float u_strength;
 out vec2 v_aura;
+out float v_height;
 void main(){
   float x = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
   float y = gl_VertexID < 2 ? -1.0 : 1.0;
   v_aura = vec2(x, y);
-  vec3 world = u_base + u_up * (1.0 + y * (0.95 + 0.85 * u_strength))
+  v_height = mix(-0.65, 4.0 + 5.0 * u_strength, y * 0.5 + 0.5);
+  vec3 world = u_base + u_up * v_height
       + u_right * (x * (0.64 + 0.78 * u_strength));
   gl_Position = u_vp * vec4(world, 1.0);
 }`, `#version 300 es
 precision highp float;
 uniform float u_strength;
 in vec2 v_aura;
+in float v_height;
 out vec4 o;
 void main(){
-  float radius = dot(v_aura, v_aura);
+  vec2 body = vec2(v_aura.x, (v_height - 1.0) / 1.65);
+  float radius = dot(body, body);
   float edge = 1.0 - smoothstep(0.35, 1.0, radius);
   float haze = exp(-radius * 3.8) * edge;
-  float rays = pow(abs(cos(atan(v_aura.y, v_aura.x + 0.0001) * 5.0)), 8.0)
+  float rays = pow(abs(cos(atan(body.y, body.x + 0.0001) * 5.0)), 8.0)
       * smoothstep(0.05, 0.38, radius) * edge;
-  o = vec4(1.0, 0.75, 0.39, u_strength * (haze * 0.54 + rays * 0.10));
+  float heightFade = smoothstep(0.6, 1.8, v_height) * (1.0 - smoothstep(0.20, 1.0, v_aura.y));
+  float plume = exp(-v_aura.x * v_aura.x * 6.0) * (1.0 - smoothstep(0.62, 1.0, abs(v_aura.x)));
+  o = vec4(1.0, 0.75, 0.39, u_strength * (haze * 0.48 + rays * 0.10 + plume * heightFade * 0.32));
 }`, ['u_vp', 'u_base', 'u_right', 'u_up', 'u_strength']);
 
 const PROG_BEAM = program(`#version 300 es
@@ -673,7 +702,12 @@ void main(){
 }`, ['u_vp', 'u_cam', 'u_sun', 'u_scale']);
 
 /* ---------------- 相机：经度坐标、海拔、纬度坐标 ---------------- */
-const DEF = { pos: [100, 1.7, 300], yaw: Math.PI, pitch: -0.06 };
+const DEF = { pos: [100 * PLANET_SCALE, 1.7, 300 * PLANET_SCALE], yaw: Math.PI, pitch: -0.06 };
+const WALK_SPEED = 8;
+const RUN_SPEED = 17;
+const JUMP_SPEED = 5.1;
+const JUMP_GRAVITY = 13;
+let jumpVelocity = 0;
 
 const INTRO_DURATION = 4550;
 const INTRO_OVERVIEW = 680;
@@ -723,6 +757,7 @@ function camView() {
   return m4lookAt(eye, [eye[0] + f[0], eye[1] + f[1], eye[2] + f[2]], up);
 }
 function jumpCamera(pos, yaw, pitch) {
+  jumpVelocity = 0;
   cam.pos = pos.slice();
   cam.yaw = yaw;
   cam.pitch = pitch;
@@ -883,9 +918,14 @@ addEventListener('keydown', (e) => {
   if (!playing) return;
   if (!e.repeat && (e.target !== $('btn-audio') || (e.code !== 'Space' && e.code !== 'Enter'))) startGameAudio();
   if (e.code === 'KeyB' && !e.repeat) showDeveloperBeam = !showDeveloperBeam;
-  if (e.code === 'Space' && e.target instanceof HTMLButtonElement) return;
+  if (e.code === 'Space') {
+    if (document.pointerLockElement !== canvas && e.target instanceof HTMLButtonElement) return;
+    e.preventDefault();
+    if (!e.repeat) startJump();
+    return;
+  }
   keys[e.code] = true;
-  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.code.startsWith('Arrow')) e.preventDefault();
   if (e.code === 'KeyR' && !landing) jumpCamera(DEF.pos, DEF.yaw, DEF.pitch);
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
@@ -906,13 +946,33 @@ document.addEventListener('pointerlockchange', () => {
 
 });
 
+function movementSpeed(region = regionAt(cam.pos[0], cam.pos[2])) {
+  return completedRegions[region] ? RUN_SPEED : WALK_SPEED;
+}
+
+function startJump() {
+  if (!playing || landing || jumpVelocity !== 0 || cam.pos[1] > DEF.pos[1]) return;
+  jumpVelocity = JUMP_SPEED;
+  stepDistance = 0;
+}
+
+function stepJump(dt) {
+  if (jumpVelocity === 0) return;
+  cam.pos[1] += jumpVelocity * dt - 0.5 * JUMP_GRAVITY * dt * dt;
+  jumpVelocity -= JUMP_GRAVITY * dt;
+  if (cam.pos[1] <= DEF.pos[1]) {
+    cam.pos[1] = DEF.pos[1];
+    jumpVelocity = 0;
+  }
+}
+
 function moveCam(dt, t) {
   if (landing) {
     introStart ??= t;
     const elapsed = t - introStart;
     const halfFov = cam.fov / 2;
     const fitAngle = Math.min(halfFov, Math.atan(Math.tan(halfFov) * W2 / H2)) * 0.84;
-    const overviewHeight = Math.max(7200, R * 1.035 / Math.sin(fitAngle) - R);
+    const overviewHeight = Math.max(7200 * PLANET_SCALE, R * 1.035 / Math.sin(fitAngle) - R);
     const progress = clamp((elapsed - INTRO_OVERVIEW) / (INTRO_DURATION - INTRO_OVERVIEW), 0, 1);
     const descent = progress * progress * (2 - progress);
     cam.pos[1] = overviewHeight * (DEF.pos[1] / overviewHeight) ** descent;
@@ -926,7 +986,8 @@ function moveCam(dt, t) {
     }
     return;
   }
-  const hs = 8;
+  stepJump(dt);
+  const hs = movementSpeed();
   const fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw);
   const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
   let mx = 0, mz = 0;
@@ -958,11 +1019,13 @@ function moveCam(dt, t) {
     }
     cam.pos[0] = x;
     cam.pos[2] = z;
-    stepDistance += hs * dt;
-    const stride = 2.65;
-    if (stepDistance >= stride) {
-      stepDistance %= stride;
-      playFootstep();
+    if (jumpVelocity === 0) {
+      stepDistance += hs * dt;
+      const stride = hs === RUN_SPEED ? 4.25 : 2.65;
+      if (stepDistance >= stride) {
+        stepDistance %= stride;
+        playFootstep();
+      }
     }
     const basis = camBasis();
     cam.yaw = Math.atan2(dot3(nextForward, basis.e), dot3(nextForward, basis.nn));
@@ -977,8 +1040,17 @@ let chunkCenters = null;
 let detailVao = [], detailBufs = [], detailCounts = [], detailCount = 0;
 let detailMeta = [];
 let closeVao = [], closeCounts = [], closeCount = 0;
-const N = REGION_COUNT * PEOPLE_PER_REGION;
+const planetPopulation = () => REGION_COUNT * peoplePerRegion;
 let starts;
+let silhouetteRegion = -1, silhouetteCount = 0;
+const silhouetteVao = gl.createVertexArray();
+const silhouetteBuffer = gl.createBuffer();
+gl.bindVertexArray(silhouetteVao);
+gl.bindBuffer(gl.ARRAY_BUFFER, silhouetteBuffer);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 16, 0);
+gl.vertexAttribDivisor(0, 1);
+gl.bindVertexArray(null);
 const POINT_BUDGET = 140000;
 const DETAIL_BUDGET = 12000;
 const CLOSE_BUDGET = 320;
@@ -1086,7 +1158,7 @@ gl.bindVertexArray(null);
 
 /* 地面 */
 /* 地面：一颗等经纬网格球（经度 256 × 纬度 128），顶点只存 (u,v)，位置在 VS 里算 */
-const GLON = 256, GLAT = 128;
+const GLON = 512, GLAT = 256;
 const groundVao = gl.createVertexArray();
 let groundIdxCount = 0;
 gl.bindVertexArray(groundVao);
@@ -1228,6 +1300,8 @@ function distanceBand(meters, precision = distancePrecision) {
 
 const regionRoute = buildRegionRoute(regionAt(DEF.pos[0], DEF.pos[2]));
 const completedRegions = new Uint8Array(REGION_COUNT);
+const FRIEND_CLEARING_RADIUS = 6.4;
+const friendLocations = new Array(REGION_COUNT);
 const regionNames = ['众声广场', '镜像街区', '猜疑小径', '评判之地', '归咎回廊', '断章之境'];
 const namedRegions = new Map(regionRoute.slice(0, regionNames.length).map((id, i) => [id, regionNames[i]]));
 const SAVE_KEY = 'planet-kindness-save-v1';
@@ -1241,11 +1315,14 @@ let lastNamedRegion = -1;
 function readSave() {
   try {
     const save = JSON.parse(localStorage.getItem(SAVE_KEY));
-    if (!save || save.version !== 1 || !Number.isInteger(save.found) || save.found < 0 ||
+    if (!save || ![1, 2, 3].includes(save.version) || !Number.isInteger(save.found) || save.found < 0 ||
         save.found > REGION_COUNT || typeof save.landed !== 'boolean' ||
-        ![save.x, save.z, save.yaw, save.pitch].every(Number.isFinite) ||
-        Math.abs(save.x) > HALF || Math.abs(save.z) > HALF) return null;
-    return save;
+        ![save.x, save.z, save.yaw, save.pitch].every(Number.isFinite)) return null;
+    const previousScale = save.version === 1 ? 1 : save.version === 2 ? 5 : PLANET_SCALE;
+    const scale = PLANET_SCALE / previousScale;
+    const x = save.x * scale, z = save.z * scale;
+    if (Math.abs(x) > HALF || Math.abs(z) > HALF) return null;
+    return { ...save, version: 3, x, z };
   } catch {
     return null;
   }
@@ -1254,7 +1331,7 @@ function readSave() {
 function saveGame() {
   if (!playing) return;
   savedGame = {
-    version: 1, found: foundCount, landed: !landing, precision: distancePrecision, x: cam.pos[0], z: cam.pos[2],
+    version: 3, population: peoplePerRegion, found: foundCount, landed: !landing, precision: distancePrecision, x: cam.pos[0], z: cam.pos[2],
     yaw: cam.yaw, pitch: cam.pitch
   };
   try {
@@ -1268,15 +1345,33 @@ function saveGame() {
 function showGameMenu() {
   $('btn-continue').disabled = !savedGame;
   $('menu-status').textContent = saveUnavailable ? '浏览器无法保存进度。关闭页面后，本次进度会丢失。' :
-    savedGame ? '本地存档 · 已找到 ' + fmt(savedGame.found) + ' 位' : '';
+    savedGame ? '本地存档 · ' + fmt((savedGame.population ?? DEFAULT_REGION_POPULATION) * REGION_COUNT) + ' 人 · 已找到 ' + fmt(savedGame.found) + ' 位' : '';
   $('menu-status').hidden = !savedGame && !saveUnavailable;
   $('game-menu').hidden = false;
 }
 
+const populationButtons = [...document.querySelectorAll('#population-buttons button')];
+for (const button of populationButtons) {
+  button.addEventListener('click', () => {
+    selectedPopulation = Number(button.dataset.people);
+    for (const option of populationButtons) {
+      option.setAttribute('aria-pressed', String(option === button));
+    }
+    $('population-note').textContent = '每区 ' + fmt(selectedPopulation) + ' 人 · 含 1 位声援者';
+  });
+}
+
 function beginGame(save) {
+  const population = save ? save.population : selectedPopulation;
+  const nextPopulation = POPULATION_OPTIONS.includes(population) ? population : DEFAULT_REGION_POPULATION;
+  if (nextPopulation !== peoplePerRegion) {
+    peoplePerRegion = nextPopulation;
+    buildPopulationBuffers();
+  }
   foundCount = save?.found ?? 0;
   landing = !save?.landed;
   introStart = undefined;
+  jumpVelocity = 0;
   const savedRegion = save ? regionAt(save.x, save.z) : -1;
   const canRestore = !landing && regionRoute.slice(0, foundCount + 1).includes(savedRegion);
   cam.pos = canRestore ? [save.x, DEF.pos[1], save.z] : DEF.pos.slice();
@@ -1310,7 +1405,7 @@ function beginGame(save) {
   lastNamedRegion = -1;
   lastSaveAt = performance.now();
   for (const id of ['message', 'precision-toast', 'boundary-hint', 'region-notice']) $(id).hidden = true;
-  $('mapn').textContent = fmt(N - foundCount * (PEOPLE_PER_REGION - 1)) + ' 人';
+  $('mapn').textContent = fmt(planetPopulation() - foundCount * (peoplePerRegion - 1)) + ' 人';
   $('distance').textContent = '';
   updateMission();
   if (landing) $('objective').textContent = '即将跳伞降落';
@@ -1399,21 +1494,44 @@ function canEnter(region) {
   return completedRegions[region] === 1 || region === currentFriend?.region;
 }
 
-// 每区有固定的 10,000 个序号，最后一个留给声援者。
-function personPosition(region, idx, out, offset = 0, margin = 0) {
-  const ordinal = idx - region * PEOPLE_PER_REGION;
-  const seed = hash32(Math.imul(region + 1, 0x85ebca6b) ^ ordinal);
-  const x = margin + (1 - 2 * margin) * hash32(seed ^ 0x632be59b) / 4294967296;
-  const z = margin + (1 - 2 * margin) * hash32(seed ^ 0xb3da3c2d) / 4294967296;
+function seededPosition(region, seed, out, offset, margin = 0) {
+  const span = 1 - 2 * margin;
+  const x = margin + span * hash32(seed ^ 0x632be59b) / 4294967296;
+  const z = margin + span * hash32(seed ^ 0xb3da3c2d) / 4294967296;
   out[offset] = (region % NCH + x) * CHUNK - HALF;
   out[offset + 1] = (Math.floor(region / NCH) + z) * CHUNK - HALF;
   return out;
 }
 
+function friendLocation(region) {
+  if (!friendLocations[region]) {
+    const seed = hash32(Math.imul(region + 1, 0x85ebca6b) ^ (DEFAULT_REGION_POPULATION - 1));
+    const [x, z] = seededPosition(region, seed, [], 0, 0.16);
+    friendLocations[region] = { x, z, ground: toSphere(x, 0, z) };
+  }
+  return friendLocations[region];
+}
+
+function personPosition(region, idx, out, offset = 0) {
+  const ordinal = idx - region * peoplePerRegion;
+  let seed = hash32(Math.imul(region + 1, 0x85ebca6b) ^ ordinal);
+  const friend = friendLocation(region);
+  // 从原区域重采样，兼顾经线接缝和高纬度区域，不减少任何角色。
+  for (let attempt = 0; attempt < 8; attempt++) {
+    seededPosition(region, seed, out, offset);
+    if (Math.abs(out[offset + 1] - friend.z) > FRIEND_CLEARING_RADIUS * 2.01 ||
+        chord2(toSphere(out[offset], 0, out[offset + 1]), friend.ground) >= FRIEND_CLEARING_RADIUS ** 2) {
+      return out;
+    }
+    seed = hash32(seed ^ 0x27d4eb2d);
+  }
+  const south = Math.floor(region / NCH) * CHUNK - HALF;
+  out[offset + 1] = friend.z < south + CHUNK / 2 ? south + CHUNK - 1 : south + 1;
+  return out;
+}
+
 function makeFriend(region) {
-  const idx = (region + 1) * PEOPLE_PER_REGION - 1;
-  const [x, z] = personPosition(region, idx, [], 0, 0.16);
-  return { region, x, z, ground: toSphere(x, 0, z), glow: 0, jumpAt: undefined, waveAt: undefined };
+  return { region, ...friendLocation(region), glow: 0, jumpAt: undefined, waveAt: undefined };
 }
 
 function updateMission() {
@@ -1442,7 +1560,7 @@ function stepMission(t) {
   }
   const chord = Math.sqrt(chord2(playerPoint(), currentFriend.ground));
   const meters = 2 * R * Math.asin(Math.min(1, chord / (2 * R)));
-  currentFriend.glow = 1 - smoothstep(2.3, 28, meters);
+  currentFriend.glow = 1 - smoothstep(2.3, 48, meters);
   if (meters <= 15) currentFriend.jumpAt ??= t;
   if (meters <= 8) currentFriend.waveAt ??= t;
   if (meters <= 2.3 && regionAt(cam.pos[0], cam.pos[2]) === currentFriend.region) {
@@ -1455,7 +1573,7 @@ function stepMission(t) {
     for (let i = first + 3; i < end; i += 4) pointColors[i] = 0;
     gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
     gl.bufferSubData(gl.ARRAY_BUFFER, first, pointColors.subarray(first, end));
-    $('mapn').textContent = fmt(N - (foundCount + 1) * (PEOPLE_PER_REGION - 1)) + ' 人';
+    $('mapn').textContent = fmt(planetPopulation() - (foundCount + 1) * (peoplePerRegion - 1)) + ' 人';
     const theme = abuseThemes[regionThemes[region]];
     $('friend-quote').textContent = '“' + theme.reply + '”';
     $('boundary-hint').hidden = true;
@@ -1485,12 +1603,20 @@ function stepMission(t) {
 async function generate() {
   progress(0.12, '划分 10,000 个区域');
   await tick();
-  starts = Uint32Array.from({ length: REGION_COUNT + 1 }, (_, i) => i * PEOPLE_PER_REGION);
   chunkCenters = Array.from({ length: REGION_COUNT }, (_, i) =>
     toSphere((i % NCH + 0.5) * CHUNK - HALF, 0, (Math.floor(i / NCH) + 0.5) * CHUNK - HALF));
-  pointStarts = Uint32Array.from({ length: REGION_COUNT + 1 }, (_, i) => Math.round(i * POINT_BUDGET / REGION_COUNT));
-  pointCount = POINT_BUDGET;
   progress(0.62, '生成远景采样');
+  buildPopulationBuffers();
+  progress(1, '完成');
+  $('mapn').textContent = fmt(planetPopulation()) + ' 人';
+  drawWorldMap(performance.now());
+}
+
+function buildPopulationBuffers() {
+  starts = Uint32Array.from({ length: REGION_COUNT + 1 }, (_, i) => i * peoplePerRegion);
+  const samplesPerRegion = Math.ceil(POINT_BUDGET / REGION_COUNT * Math.sqrt(peoplePerRegion / DEFAULT_REGION_POPULATION));
+  pointStarts = Uint32Array.from({ length: REGION_COUNT + 1 }, (_, i) => i * samplesPerRegion);
+  pointCount = pointStarts[REGION_COUNT];
   const pos = new Float32Array(pointCount * 3);
   const col = pointColors = new Uint8Array(pointCount * 4);
   const xz = [0, 0];
@@ -1522,9 +1648,6 @@ async function generate() {
   gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.UNSIGNED_BYTE, true, 0, 0);
   gl.bindVertexArray(null);
-  progress(1, '完成');
-  $('mapn').textContent = fmt(N) + ' 人';
-  drawWorldMap(performance.now());
 }
 
 function personStyle(idx) {
@@ -1557,12 +1680,18 @@ function crowdVao(mesh, first, instance, push) {
 }
 
 let detailAirborne = false;
+let detailRegion = -1;
 function rebuildDetail(force) {
   if (!starts) return;
   const center = playerPoint();
   const airborne = cam.pos[1] > 620;
-  if (!force && airborne === detailAirborne && (airborne || chord2(center, lastDetailPos) < 26 ** 2)) return;
+  const region = regionAt(cam.pos[0], cam.pos[2]);
+  if (!force && airborne === detailAirborne && region === detailRegion &&
+      (airborne || chord2(center, lastDetailPos) < 14 ** 2)) return;
   detailAirborne = airborne;
+  detailRegion = region;
+  silhouetteRegion = airborne || completedRegions[region] ? -1 : region;
+  silhouetteCount = 0;
   lastDetailPos = center;
   for (const v of detailVao) if (v) gl.deleteVertexArray(v);
   for (const v of closeVao) if (v) gl.deleteVertexArray(v);
@@ -1576,17 +1705,17 @@ function rebuildDetail(force) {
   for (let ci = 0; ci < chunkCenters.length; ci++) {
     if (completedRegions[ci]) continue;
     const d2 = chord2(center, chunkCenters[ci]);
-    if (d2 >= 320 ** 2) continue;
-    const d = Math.sqrt(d2);
+    const d = Math.max(0, Math.sqrt(d2) - REGION_BOUND_RADIUS);
+    if (d >= 320) continue;
     const latitude = (Math.floor(ci / NCH) * CHUNK + CHUNK / 2 - HALF) * D2R2;
     const limit = Math.round((900 + 2300 * (1 - d / 320)) * Math.cos(latitude));
     const reserve = pointStarts[ci + 1] - pointStarts[ci];
-    const take = Math.min(PEOPLE_PER_REGION - 1, Math.max(reserve, limit));
+    const take = Math.min(peoplePerRegion - 1, Math.max(reserve, limit));
     if (!take) continue;
     list.push({ ci, take, d2 });
     requested += take;
   }
-  list.sort((a, b) => a.d2 - b.d2);
+  list.sort((a, b) => Number(b.ci === region) - Number(a.ci === region) || a.d2 - b.d2);
   let cumulative = 0, previous = 0;
   for (const item of list) {
     cumulative += item.take;
@@ -1601,14 +1730,23 @@ function rebuildDetail(force) {
     const arr = new Float32Array(item.take * 9);
     const xyz = new Float32Array(item.take * 3);
     const pushArr = new Float32Array(item.take * 3);
+    const localRegion = item.ci === silhouetteRegion;
+    const candidates = localRegion ? rankLocalCrowd(item.ci, center) : null;
     const positions = new Float32Array(item.take * 2);
+    if (candidates) uploadSilhouettes(candidates, item.take, s0);
     const nearby = [];
     const speechStyles = new Uint32Array(item.take);
     const heights = new Float32Array(item.take);
     for (let j = 0; j < item.take; j++) {
-      personPosition(item.ci, s0 + j, positions, j * 2);
+      const candidate = candidates?.[j];
+      if (candidate) {
+        positions[j * 2] = candidate.x;
+        positions[j * 2 + 1] = candidate.z;
+      } else {
+        personPosition(item.ci, s0 + j, positions, j * 2);
+      }
       if (closeCount >= CLOSE_BUDGET) continue;
-      const d2 = chord2(center, toSphere(positions[j * 2], 0, positions[j * 2 + 1]));
+      const d2 = candidate?.d2 ?? chord2(center, toSphere(positions[j * 2], 0, positions[j * 2 + 1]));
       if (d2 < CLOSE_RADIUS ** 2) nearby.push({ j, d2 });
     }
     nearby.sort((a, b) => a.d2 - b.d2);
@@ -1619,7 +1757,7 @@ function rebuildDetail(force) {
     let k = 0;
     for (let j = 0; j < item.take; j++) {
       const ordinal = ordinals[j];
-      const idx = s0 + ordinal;
+      const idx = s0 + (candidates?.[ordinal].ordinal ?? ordinal);
       arr[k] = positions[ordinal * 2];
       arr[k + 2] = positions[ordinal * 2 + 1];
       xyz.set(toSphere(arr[k], 0, arr[k + 2]), j * 3);
@@ -1653,6 +1791,35 @@ function rebuildDetail(force) {
     detailMeta.push({ region: item.ci, n: item.take, xyz, heights, speechStyles, center: chunkCenters[item.ci], push: pushArr, buf: pb });
     detailCount += item.take;
   }
+  if (silhouetteRegion !== -1 && !detailMeta.some(group => group.region === silhouetteRegion)) {
+    uploadSilhouettes(rankLocalCrowd(region, center), 0, starts[region]);
+  }
+}
+
+function rankLocalCrowd(region, center) {
+  const position = [0, 0];
+  const crowd = new Array(peoplePerRegion - 1);
+  for (let ordinal = 0; ordinal < crowd.length; ordinal++) {
+    const [x, z] = personPosition(region, starts[region] + ordinal, position);
+    crowd[ordinal] = { ordinal, x, z, d2: chord2(center, toSphere(x, 0, z)) };
+  }
+  crowd.sort((a, b) => a.d2 - b.d2);
+  return crowd;
+}
+
+function uploadSilhouettes(crowd, meshCount, start) {
+  silhouetteCount = crowd.length - meshCount;
+  const data = new Float32Array(silhouetteCount * 4);
+  for (let i = meshCount; i < crowd.length; i++) {
+    const person = crowd[i], style = personStyle(start + person.ordinal);
+    const offset = (i - meshCount) * 4;
+    data[offset] = person.x;
+    data[offset + 1] = person.z;
+    data[offset + 2] = 1.62 * (0.92 + (style & 255) / 255 * 0.20);
+    data[offset + 3] = ((style >>> 8) & 255) / 255;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, silhouetteBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
 }
 
 /* ---------------- 近处贴身避让 ---------------- */
@@ -1686,7 +1853,7 @@ function stepCollision() {
   // 在玩家脚下的切平面上解算碰撞，结果以三维位移传回着色器。
   colN = 0;
   activeCol.length = 0;
-  const chunkLim = RR + 150;
+  const chunkLim = RR + REGION_BOUND_RADIUS;
   for (let ci = 0; ci < detailMeta.length; ci++) {
     const m = detailMeta[ci];
     if (chord2(m.center, center) > chunkLim ** 2) continue;
@@ -1922,6 +2089,17 @@ function frame(t) {
     gl.bindVertexArray(null);
   }
 
+  if (silhouetteCount) {
+    gl.useProgram(PROG_CROWD_SILHOUETTES.p);
+    gl.uniformMatrix4fv(PROG_CROWD_SILHOUETTES.u.u_vp, false, vp);
+    gl.uniform3fv(PROG_CROWD_SILHOUETTES.u.u_cam, eye);
+    gl.uniform3fv(PROG_CROWD_SILHOUETTES.u.u_fog, FOGV);
+    gl.bindVertexArray(silhouetteVao);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, silhouetteCount);
+    gl.bindVertexArray(null);
+    calls++;
+  }
+
   // 点云（加色混合：密集处自然发亮）
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
@@ -1931,17 +2109,23 @@ function frame(t) {
   gl.uniform3fv(PROG_POINTS.u.u_cam, eye);
   gl.uniform1f(PROG_POINTS.u.u_px, dpr);
   gl.uniform1f(PROG_POINTS.u.u_near, 90);
-  gl.uniform1f(PROG_POINTS.u.u_far, 30000);
-  gl.uniform1f(PROG_POINTS.u.u_size, cam.pos[1] > 620 ? 2400 : 1250);
+  gl.uniform1f(PROG_POINTS.u.u_far, Math.max(30000, cam.pos[1] + 3 * R));
+  gl.uniform1f(PROG_POINTS.u.u_size, cam.pos[1] > 620 ? 2400 * Math.max(1, cam.pos[1] / 7200) : 1250);
   gl.bindVertexArray(pointsVao);
-  gl.drawArrays(gl.POINTS, 0, pointCount);
+  if (silhouetteRegion === -1) {
+    gl.drawArrays(gl.POINTS, 0, pointCount);
+  } else {
+    gl.drawArrays(gl.POINTS, 0, pointStarts[silhouetteRegion]);
+    const after = pointStarts[silhouetteRegion + 1];
+    gl.drawArrays(gl.POINTS, after, pointCount - after);
+  }
   gl.bindVertexArray(null);
   gl.depthMask(true);
   gl.disable(gl.BLEND);
 
   for (const friend of nearbyFriends) {
     const { ground, x, z, glow } = friend;
-    if (glow <= 0 || chord2(plyNow, ground) > 40 ** 2) continue;
+    if (glow <= 0 || chord2(plyNow, ground) > 54 ** 2) continue;
     const { n, e } = surfaceBasis(x, z);
     const side = cross3(n, eye.map((value, i) => value - ground[i]));
     const right = Math.hypot(...side) < 0.001 ? e : norm3(side);
@@ -1994,7 +2178,7 @@ function frame(t) {
   $('r-ms').textContent = msAvg.toFixed(1) + ' ms';
 
   window.__bench = {
-    fps: +fps.toFixed(1), ms: +msAvg.toFixed(2), people: N, points: pointCount,
+    fps: +fps.toFixed(1), ms: +msAvg.toFixed(2), people: planetPopulation(), points: pointCount,
     detail: detailCount, close: closeCount, calls: calls + 1,
     colN: colStats.n, colMs: +colStats.ms.toFixed(2),
   };
@@ -2011,7 +2195,7 @@ function drawCrowdBubbles(vp, t) {
 
   const candidates = [];
   for (const group of detailMeta) {
-    if (completedRegions[group.region] || chord2(plyNow, group.center) > 170 ** 2) continue;
+    if (completedRegions[group.region] || chord2(plyNow, group.center) > (SPEECH_RADIUS + REGION_BOUND_RADIUS) ** 2) continue;
     const remarks = abuseThemes[regionThemes[group.region]].remarks;
     for (let i = 0; i < group.n; i++) {
       const j = i * 3;
