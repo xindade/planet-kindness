@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>在一亿人中寻找友善的人</title>
+<title>在一亿人中寻找声援者</title>
 <style>
   :root{--bg:#0b0d12;--fg:#e9ecf4;--dim:#8b93a7;--line:rgba(255,255,255,.09);--accent:#7fd1c0}
   *{box-sizing:border-box}
@@ -114,7 +114,7 @@
 </div>
 
 <div class="panel" id="title">
-  <h1>在一亿人中寻找友善的人</h1>
+  <h1>在一亿人中寻找声援者</h1>
   <p>点击画面控制视角，按 <kbd>Esc</kbd> 释放鼠标。</p>
   <p id="keys"><kbd>W A S D</kbd> 移动<br>
     <kbd>R</kbd> 返回初始区域</p>
@@ -123,19 +123,19 @@
 <div class="panel" id="mission">
   <div id="mission-row">
     <p id="found">已找到 0 / 10,000</p>
-    <span id="distance" hidden aria-label="友善之人的距离档位"></span>
+    <span id="distance" hidden aria-label="声援者的距离档位"></span>
   </div>
   <p id="objective" role="status">即将跳伞降落</p>
   <button id="btn-audio" type="button" aria-pressed="false">开启声音</button><button id="btn-exit" type="button">退出游戏</button>
 </div>
-<div id="precision-toast" role="status" hidden>更容易找到友善之人</div>
-<aside id="message" role="status" hidden><strong>友善之人</strong><p id="friend-quote"></p></aside>
+<div id="precision-toast" role="status" hidden>更容易找到声援者</div>
+<aside id="message" role="status" hidden><strong>声援者</strong><p id="friend-quote"></p></aside>
 <div id="boundary-hint" role="status" hidden></div>
 
 <div id="region-notice" role="status" hidden></div>
 <div id="game-menu" hidden>
   <section aria-labelledby="menu-title">
-    <h1 id="menu-title">在一亿人中寻找友善的人</h1>
+    <h1 id="menu-title">在一亿人中寻找声援者</h1>
     <button id="btn-start" type="button">开始游戏</button>
     <button id="btn-continue" type="button" disabled>继续游戏</button>
     <p id="menu-status" role="status" hidden></p>
@@ -366,7 +366,8 @@ layout(location=5) in float a_part;
 layout(location=6) in vec3 i_push;
 uniform mat4 u_vp;
 uniform float u_time;
-uniform vec3 u_ply;   // 玩家所在的世界坐标（第三人称时与相机不在同一点）
+uniform vec3 u_ply;
+uniform vec4 u_greeting; // 跳跃高度、右肩前抬、右肩外摆、指路转身幅度
 out vec3 v_n;
 out vec3 v_c;
 out vec3 v_w;
@@ -379,6 +380,10 @@ vec3 rotX(vec3 p, float py, float a){
   float c = cos(a), s = sin(a);
   q = vec3(q.x, q.y * c - q.z * s, q.y * s + q.z * c);
   return q + vec3(0.0, py, 0.0);
+}
+vec3 shoulderTurn(vec3 p, float a){
+  float c = cos(a), s = sin(a);
+  return vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z);
 }
 void main(){
   vec3 home = i_off;
@@ -407,6 +412,12 @@ void main(){
       p.y += closeness * 0.006 * sin(phase);
     }
   }
+  if (a_part > 4.5 && (u_greeting.y > 0.0 || u_greeting.z > 0.0)) {
+    vec3 shoulder = vec3(0.26, 1.24, 0.0);
+    p = shoulder + shoulderTurn(rotX(a_pos - shoulder, 0.0, -u_greeting.y), u_greeting.z);
+    localNormal = shoulderTurn(rotX(a_nrm, 0.0, -u_greeting.y), u_greeting.z);
+  }
+  p.y += u_greeting.x;
   p.x *= mix(0.78, 1.24, variant);
   p *= s;
   // 用三维球面距离避让，经线接缝两边的人仍然能互相看到。
@@ -421,7 +432,11 @@ void main(){
   vec3 towardPlayer = u_ply - n * SPH_R;
   if (length(foot - u_ply) <= float(${SPEECH_RADIUS + 2})) {
     vec2 face = vec2(dot(towardPlayer, e), dot(towardPlayer, nn));
-    if (dot(face, face) > 0.0001) rot = atan(face.x, face.y);
+    if (dot(face, face) > 0.0001) {
+      float towardPlayerYaw = atan(face.x, face.y);
+      float delta = rot - towardPlayerYaw;
+      rot = towardPlayerYaw + atan(sin(delta), cos(delta)) * u_greeting.w;
+    }
   }
   float c = cos(rot), sn = sin(rot);
   vec3 lx = e * (c * p.x + sn * p.z) + nn * (-sn * p.x + c * p.z);
@@ -520,7 +535,7 @@ void main(){
   }
   col = mix(col, u_fog, smoothstep(230.0, 620.0, d));
   o = vec4(col, 1.0);
-}`, ['u_vp', 'u_time', 'u_cam', 'u_ply', 'u_fog', 'u_glow']);
+}`, ['u_vp', 'u_time', 'u_cam', 'u_ply', 'u_fog', 'u_glow', 'u_greeting']);
 
 const PROG_GROUND = program(`#version 300 es
 precision highp float;
@@ -935,7 +950,7 @@ function moveCam(dt, t) {
     if (!canEnter(regionAt(x, z))) {
       const hint = $('boundary-hint');
       const inSearchRegion = regionAt(cam.pos[0], cam.pos[2]) === currentFriend?.region;
-      const text = inSearchRegion ? '请先找到这个区域的友善之人' : '请先前往已解锁的区域，找到那里的友善之人';
+      const text = inSearchRegion ? '请先找到这个区域的声援者' : '请先前往已解锁的区域，找到那里的声援者';
       if (hint.textContent !== text) hint.textContent = text;
       hint.hidden = false;
       boundaryUntil = t + 1800;
@@ -1354,12 +1369,37 @@ let messageUntil = 0;
 let currentFriend = makeFriend(regionRoute[0]);
 const foundFriends = [];
 let friendVao, friendBuffer;
+function pointingYaw(friend, target, facing = playerPoint()) {
+  const { e, nn } = surfaceBasis(friend.x, friend.z);
+  const direction = (target ?? facing).map((value, i) => value - friend.ground[i]);
+  return Math.atan2(dot3(direction, e), dot3(direction, nn));
+}
+
+function greetingPose(friend, t) {
+  if (friend.pointing) {
+    const age = t - friend.pointing.at;
+    const turn = smoothstep(0, 480, age) * (1 - smoothstep(3800, 4300, age));
+    const reach = smoothstep(180, 600, age) * (1 - smoothstep(3500, 4000, age));
+    return [0, reach * Math.PI / 2, 0, turn];
+  }
+  if (friend === currentFriend) {
+    const age = t - friend.jumpAt;
+    const jump = age >= 0 && age < 640 ? Math.sin(Math.PI * age / 640) * 0.52 : 0;
+    const waveAge = t - friend.waveAt;
+    if (waveAge >= 0 && waveAge < 1150) {
+      const envelope = smoothstep(0, 180, waveAge) * (1 - smoothstep(850, 1150, waveAge));
+      return [jump, envelope * 0.9, envelope * (2.36 + Math.sin(waveAge * 0.024) * 0.25), 0];
+    }
+    return [jump, 0, 0, 0];
+  }
+  return [0, 0, 0, 0];
+}
 
 function canEnter(region) {
   return completedRegions[region] === 1 || region === currentFriend?.region;
 }
 
-// 每区有固定的 10,000 个序号，最后一个留给友善之人。
+// 每区有固定的 10,000 个序号，最后一个留给声援者。
 function personPosition(region, idx, out, offset = 0, margin = 0) {
   const ordinal = idx - region * PEOPLE_PER_REGION;
   const seed = hash32(Math.imul(region + 1, 0x85ebca6b) ^ ordinal);
@@ -1373,13 +1413,13 @@ function personPosition(region, idx, out, offset = 0, margin = 0) {
 function makeFriend(region) {
   const idx = (region + 1) * PEOPLE_PER_REGION - 1;
   const [x, z] = personPosition(region, idx, [], 0, 0.16);
-  return { region, x, z, ground: toSphere(x, 0, z), glow: 0 };
+  return { region, x, z, ground: toSphere(x, 0, z), glow: 0, jumpAt: undefined, waveAt: undefined };
 }
 
 function updateMission() {
   $('found').textContent = '已找到 ' + fmt(foundCount) + ' / 10,000';
-  $('objective').textContent = !currentFriend ? '你找齐了所有友善之人' :
-    foundCount ? '友善之人 · 估算距离' : '在初始区域寻找第一位友善之人，留意微光';
+  $('objective').textContent = !currentFriend ? '你找齐了所有声援者' :
+    foundCount ? '声援者 · 估算距离' : '在初始区域寻找第一位声援者，留意微光';
   $('distance').hidden = !foundCount || !currentFriend;
 }
 
@@ -1387,7 +1427,8 @@ function stepMission(t) {
   if (t >= precisionToastUntil) $('precision-toast').hidden = true;
   if (t >= boundaryUntil) $('boundary-hint').hidden = true;
   if (t >= messageUntil) $('message').hidden = true;
-  if (landing || !currentFriend) return;
+  if (landing) return;
+  if (!currentFriend) return;
   if (regionAt(cam.pos[0], cam.pos[2]) === currentFriend.region) {
     const precision = precisionForRegion(foundCount + 1);
     if (precision < distancePrecision) {
@@ -1402,6 +1443,8 @@ function stepMission(t) {
   const chord = Math.sqrt(chord2(playerPoint(), currentFriend.ground));
   const meters = 2 * R * Math.asin(Math.min(1, chord / (2 * R)));
   currentFriend.glow = 1 - smoothstep(2.3, 28, meters);
+  if (meters <= 15) currentFriend.jumpAt ??= t;
+  if (meters <= 8) currentFriend.waveAt ??= t;
   if (meters <= 2.3 && regionAt(cam.pos[0], cam.pos[2]) === currentFriend.region) {
     const region = currentFriend.region;
     completedRegions[region] = 1;
@@ -1422,6 +1465,9 @@ function stepMission(t) {
     previousDistanceBand = null;
     playDiscoverySound();
     currentFriend = foundCount < regionRoute.length ? makeFriend(regionRoute[foundCount]) : null;
+    if (currentFriend) {
+      foundFriends.at(-1).pointing = { at: t + 280, target: chunkCenters[currentFriend.region] };
+    }
     rebuildDetail(true);
     updateMission();
     saveGame();
@@ -1848,6 +1894,7 @@ function frame(t) {
     gl.uniform3fv(PROG_DETAIL.u.u_fog, FOGV);
     gl.uniform3fv(PROG_DETAIL.u.u_ply, plyNow);
     gl.uniform1f(PROG_DETAIL.u.u_glow, 0);
+    gl.uniform4f(PROG_DETAIL.u.u_greeting, 0, 0, 0, 0);
     for (let i = 0; i < detailVao.length; i++) {
       if (detailVao[i]) {
         gl.bindVertexArray(detailVao[i]);
@@ -1861,14 +1908,13 @@ function frame(t) {
       }
     }
     for (const friend of nearbyFriends) {
-      const local = surfaceBasis(friend.x, friend.z);
-      const facing = plyNow.map((v, i) => v - friend.ground[i]);
-      const yaw = Math.atan2(dot3(facing, local.e), dot3(facing, local.nn));
+      const yaw = pointingYaw(friend, friend.pointing?.target, plyNow);
       gl.bindBuffer(gl.ARRAY_BUFFER, friendBuffer);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Float32Array([
         friend.x, 0, friend.z, 1, yaw, 0, 0.31, 0.40, 0.38
       ]));
       gl.uniform1f(PROG_DETAIL.u.u_glow, friend.glow);
+      gl.uniform4fv(PROG_DETAIL.u.u_greeting, greetingPose(friend, t));
       gl.bindVertexArray(friendVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, detailMeshCount, 1);
       calls++;
@@ -1904,7 +1950,8 @@ function frame(t) {
     gl.depthMask(false);
     gl.useProgram(PROG_FRIEND_AURA.p);
     gl.uniformMatrix4fv(PROG_FRIEND_AURA.u.u_vp, false, vp);
-    gl.uniform3fv(PROG_FRIEND_AURA.u.u_base, ground);
+    const jump = greetingPose(friend, t)[0];
+    gl.uniform3fv(PROG_FRIEND_AURA.u.u_base, ground.map((v, i) => v + n[i] * jump));
     gl.uniform3fv(PROG_FRIEND_AURA.u.u_right, right);
     gl.uniform3fv(PROG_FRIEND_AURA.u.u_up, n);
     gl.uniform1f(PROG_FRIEND_AURA.u.u_strength, Math.sqrt(glow));
