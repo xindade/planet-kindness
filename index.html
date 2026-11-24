@@ -70,7 +70,15 @@
   }
 
 #mission { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; width: min(390px, 44vw); }
-#btn-beam[aria-pressed="true"] { color: #ffe1a6; border-color: #ffe1a6; }
+#game-menu { position: fixed; inset: 0; z-index: 30; place-items: center; background: radial-gradient(ellipse at 50% 32%, #243c52 0%, #0a111d 74%); }
+#game-menu:not([hidden]) { display: grid; }
+#game-menu section { width: min(380px, 86vw); display: grid; gap: 12px; text-align: center; }
+#game-menu h1 { font-size: clamp(20px, 5vw, 29px); margin: 0 0 16px; }
+#game-menu button { padding: 11px 18px; font-size: 16px; }
+#game-menu button:disabled { opacity: .48; cursor: default; }
+#menu-status { color: #efd1a1; margin: 0; }
+#btn-exit { pointer-events: auto; margin-left: 6px; font-size: 12px; }
+#region-notice { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 2; width: max-content; max-width: 90vw; box-sizing: border-box; padding: 12px 20px; border: 1px solid #e7bd79; border-radius: 10px; background: #142131ed; color: #ffe5b5; text-align: center; pointer-events: none; font-size: clamp(17px, 4vw, 26px); font-weight: 650; }
 #btn-audio { pointer-events: auto; font-size: 12px; }
 #mission > * { margin: 0 0 8px; }
 #mission-row { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 4px 12px; }
@@ -108,9 +116,8 @@
 <div class="panel" id="title">
   <h1>在一亿人中寻找友善的人</h1>
   <p>点击画面控制视角，按 <kbd>Esc</kbd> 释放鼠标。</p>
-  <p id="keys"><kbd>W A S D</kbd> 移动 <kbd>Shift</kbd> 加速 <kbd>V</kbd> 切换视角<br>
+  <p id="keys"><kbd>W A S D</kbd> 移动<br>
     <kbd>R</kbd> 返回初始区域</p>
-  <button id="btn-beam" type="button" aria-pressed="false">开发者光柱 <kbd>B</kbd></button>
 </div>
 
 <div class="panel" id="mission">
@@ -119,12 +126,21 @@
     <span id="distance" hidden aria-label="友善之人的距离档位"></span>
   </div>
   <p id="objective" role="status">即将跳伞降落</p>
-  <button id="btn-audio" type="button" aria-pressed="false">开启声音</button>
+  <button id="btn-audio" type="button" aria-pressed="false">开启声音</button><button id="btn-exit" type="button">退出游戏</button>
 </div>
 <div id="precision-toast" role="status" hidden>更容易找到友善之人</div>
 <aside id="message" role="status" hidden><strong>友善之人</strong><p id="friend-quote"></p></aside>
 <div id="boundary-hint" role="status" hidden></div>
 
+<div id="region-notice" role="status" hidden></div>
+<div id="game-menu" hidden>
+  <section aria-labelledby="menu-title">
+    <h1 id="menu-title">在一亿人中寻找友善的人</h1>
+    <button id="btn-start" type="button">开始游戏</button>
+    <button id="btn-continue" type="button" disabled>继续游戏</button>
+    <p id="menu-status" role="status" hidden></p>
+  </section>
+</div>
 <div id="loading">
   <div class="lt">正在生成人口场…</div>
   <div class="lbar"><i id="lbar-i"></i></div>
@@ -506,47 +522,6 @@ void main(){
   o = vec4(col, 1.0);
 }`, ['u_vp', 'u_time', 'u_cam', 'u_ply', 'u_fog', 'u_glow']);
 
-/* 玩家化身：第三人称时用一个人形站在玩家位置，否则镜头后面只有空气。
-   复用 buildHuman() 的同一份网格，只是换一个简单的程序（一个矩阵 + 一个颜色）。 */
-const PROG_AVATAR = program(`#version 300 es
-layout(location=0) in vec3 a_pos;
-layout(location=1) in vec3 a_nrm;
-uniform mat4 u_mvp;
-uniform vec3 u_world;
-uniform vec3 u_ply;
-out vec3 v_n;
-out vec3 v_w;
-void main(){
-  v_n = a_nrm;
-  vec3 w = u_world + a_pos;
-  /* 让路：和人群那套一样，但先在切平面里量距离（3D 距离会被身高吃掉） */
-  vec3 up = normalize(w);
-  vec3 dp = w - u_ply;
-  dp -= up * dot(dp, up);
-  float dl = length(dp);
-  float nr = 1.0 - smoothstep(0.85, 2.60, dl);
-  w -= normalize(dp + vec3(1e-5)) * nr * 1.00;
-  v_w = w;                   // 够用来算雾
-  gl_Position = u_mvp * vec4(a_pos, 1.0);
-}`, `#version 300 es
-precision highp float;
-in vec3 v_n;
-in vec3 v_w;
-uniform vec3 u_cam;
-uniform vec3 u_fog;
-uniform vec3 u_tint;
-out vec4 o;
-void main(){
-  vec3 L = normalize(vec3(0.42, 0.86, 0.28));
-  float ndl = max(dot(normalize(v_n), L), 0.0);
-  vec3 col = u_tint * (0.42 + 0.72 * ndl);
-  col = mix(col, u_fog, smoothstep(230.0, 620.0, length(v_w - u_cam)));
-  o = vec4(col, 1.0);
-}`, ['u_mvp', 'u_cam', 'u_fog', 'u_world', 'u_tint', 'u_ply']);
-
-let avatarVao = null;
-const _amat = new Float32Array(16);
-
 const PROG_GROUND = program(`#version 300 es
 precision highp float;
 ${GLSL_SPH}
@@ -711,26 +686,10 @@ function camBasis() {
   return surfaceBasis(cam.pos[0], cam.pos[2]);
 }
 function camEye() {
-  const p = toSphere(cam.pos[0], 0, cam.pos[2]);       // 玩家脚点
-  if (camDist <= 0.01) return toSphere(cam.pos[0], cam.pos[1], cam.pos[2]);
-  /* 第三人称：站到玩家身后。抬 1.5 m 让视线越过他的肩，往下压一点才能看到脚下 */
-  const f = camDir();
-  const b = camBasis();
-  const lift = cam.pos[1] > 400 ? cam.pos[1] : 2.1;
-  /* 再往右挪一点：人站偏左，准星不被自己的后脑勺挡住 */
-  const rt = norm3(cross3(f, b.n));
-  const sd = cam.pos[1] > 400 ? 0 : 0.85;
-  return [
-    p[0] - f[0] * camDist + b.n[0] * lift + rt[0] * sd,
-    p[1] - f[1] * camDist + b.n[1] * lift + rt[1] * sd,
-    p[2] - f[2] * camDist + b.n[2] * lift + rt[2] * sd,
-  ];
+  return toSphere(cam.pos[0], cam.pos[1], cam.pos[2]);
 }
-/* 玩家（脚底站在球面上的那个点）。第一人称时与相机重合，
-   第三人称时相机在后面，两者分开——但"打谁、往哪飞"都以玩家为准。 */
-let plyNow = [0, 3183.0988, 0];
+let plyNow;
 function playerPoint() { return toSphere(cam.pos[0], 0, cam.pos[2]); }
-let camDist = 0;        // 第三人称距离；0 = 第一人称（默认）
 function camDir() {
   const pit = cam.pitch, yaw = cam.yaw;
   const cp = Math.cos(pit), b = camBasis();
@@ -770,7 +729,7 @@ const musicChords = [
 ];
 
 function startGameAudio() {
-  if (audioMuted || document.hidden) return;
+  if (!playing || audioMuted || document.hidden) return;
   const Audio = window.AudioContext || window.webkitAudioContext;
   if (!Audio) return;
   if (!gameAudio) {
@@ -905,23 +864,18 @@ function playDiscoverySound() {
 }
 
 let showDeveloperBeam = false;
-function toggleDeveloperBeam() {
-  showDeveloperBeam = !showDeveloperBeam;
-  $('btn-beam').setAttribute('aria-pressed', String(showDeveloperBeam));
-}
-$('btn-beam').addEventListener('click', toggleDeveloperBeam);
-
 addEventListener('keydown', (e) => {
+  if (!playing) return;
   if (!e.repeat && (e.target !== $('btn-audio') || (e.code !== 'Space' && e.code !== 'Enter'))) startGameAudio();
-  if (e.code === 'KeyB' && !e.repeat) toggleDeveloperBeam();
+  if (e.code === 'KeyB' && !e.repeat) showDeveloperBeam = !showDeveloperBeam;
   if (e.code === 'Space' && e.target instanceof HTMLButtonElement) return;
   keys[e.code] = true;
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
-  if (e.code === 'KeyV' && !landing) { camDist = camDist > 0.01 ? 0 : 6.5; rebuildDetail(true); }
   if (e.code === 'KeyR' && !landing) jumpCamera(DEF.pos, DEF.yaw, DEF.pitch);
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 canvas.addEventListener('click', () => {
+  if (!playing) return;
   startGameAudio();
   if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
 });
@@ -957,8 +911,7 @@ function moveCam(dt, t) {
     }
     return;
   }
-  const fast = keys.ShiftLeft || keys.ShiftRight;
-  const hs = fast ? 20 : 8;
+  const hs = 8;
   const fx = Math.sin(cam.yaw), fz = Math.cos(cam.yaw);
   const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
   let mx = 0, mz = 0;
@@ -991,7 +944,7 @@ function moveCam(dt, t) {
     cam.pos[0] = x;
     cam.pos[2] = z;
     stepDistance += hs * dt;
-    const stride = fast ? 4.5 : 2.65;
+    const stride = 2.65;
     if (stepDistance >= stride) {
       stepDistance %= stride;
       playFootstep();
@@ -1226,12 +1179,6 @@ function buildHuman(rounded = false) {
   gl.bindBuffer(gl.ARRAY_BUFFER, baseMeshVbo);
   gl.bufferData(gl.ARRAY_BUFFER, mesh, gl.STATIC_DRAW);
   gl.bindBuffer(gl.ARRAY_BUFFER, null);
-  /* 玩家化身用自己的 VAO，但共用同一份网格缓冲 */
-  avatarVao = gl.createVertexArray();
-  gl.bindVertexArray(avatarVao);
-  gl.bindBuffer(gl.ARRAY_BUFFER, baseMeshVbo);
-  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 28, 12);
   gl.bindVertexArray(null);
 }
 
@@ -1266,6 +1213,128 @@ function distanceBand(meters, precision = distancePrecision) {
 
 const regionRoute = buildRegionRoute(regionAt(DEF.pos[0], DEF.pos[2]));
 const completedRegions = new Uint8Array(REGION_COUNT);
+const regionNames = ['众声广场', '镜像街区', '猜疑小径', '评判之地', '归咎回廊', '断章之境'];
+const namedRegions = new Map(regionRoute.slice(0, regionNames.length).map((id, i) => [id, regionNames[i]]));
+const SAVE_KEY = 'planet-kindness-save-v1';
+let playing = false;
+let savedGame;
+let lastSaveAt = 0;
+let saveUnavailable = false;
+let regionNoticeUntil = 0;
+let lastNamedRegion = -1;
+
+function readSave() {
+  try {
+    const save = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (!save || save.version !== 1 || !Number.isInteger(save.found) || save.found < 0 ||
+        save.found > REGION_COUNT || typeof save.landed !== 'boolean' ||
+        ![save.x, save.z, save.yaw, save.pitch].every(Number.isFinite) ||
+        Math.abs(save.x) > HALF || Math.abs(save.z) > HALF) return null;
+    return save;
+  } catch {
+    return null;
+  }
+}
+
+function saveGame() {
+  if (!playing) return;
+  savedGame = {
+    version: 1, found: foundCount, landed: !landing, precision: distancePrecision, x: cam.pos[0], z: cam.pos[2],
+    yaw: cam.yaw, pitch: cam.pitch
+  };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(savedGame));
+    saveUnavailable = false;
+  } catch {
+    saveUnavailable = true;
+  }
+}
+
+function showGameMenu() {
+  $('btn-continue').disabled = !savedGame;
+  $('menu-status').textContent = saveUnavailable ? '浏览器无法保存进度。关闭页面后，本次进度会丢失。' :
+    savedGame ? '本地存档 · 已找到 ' + fmt(savedGame.found) + ' 位' : '';
+  $('menu-status').hidden = !savedGame && !saveUnavailable;
+  $('game-menu').hidden = false;
+}
+
+function beginGame(save) {
+  foundCount = save?.found ?? 0;
+  landing = !save?.landed;
+  introStart = undefined;
+  const savedRegion = save ? regionAt(save.x, save.z) : -1;
+  const canRestore = !landing && regionRoute.slice(0, foundCount + 1).includes(savedRegion);
+  cam.pos = canRestore ? [save.x, DEF.pos[1], save.z] : DEF.pos.slice();
+  if (!canRestore && !landing && foundCount) {
+    const fallback = makeFriend(regionRoute[Math.min(foundCount, REGION_COUNT - 1)]);
+    cam.pos = [fallback.x, DEF.pos[1], fallback.z];
+  }
+  cam.yaw = canRestore ? save.yaw : DEF.yaw;
+  cam.pitch = landing ? -Math.PI / 2 : canRestore ? clamp(save.pitch, -1.45, 1.45) : DEF.pitch;
+  completedRegions.fill(0);
+  foundFriends.length = 0;
+  for (let i = 0; i < foundCount; i++) {
+    const region = regionRoute[i];
+    completedRegions[region] = 1;
+    const friend = makeFriend(region);
+    friend.glow = 1;
+    foundFriends.push(friend);
+  }
+  for (let region = 0; region < REGION_COUNT; region++) {
+    const alpha = completedRegions[region] ? 0 : 255;
+    for (let j = pointStarts[region] * 4 + 3; j < pointStarts[region + 1] * 4; j += 4) pointColors[j] = alpha;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, pointColors);
+  currentFriend = foundCount < REGION_COUNT ? makeFriend(regionRoute[foundCount]) : null;
+  const inTarget = currentFriend?.region === regionAt(cam.pos[0], cam.pos[2]);
+  const inferredPrecision = precisionForRegion(foundCount + (inTarget ? 1 : 0));
+  distancePrecision = save?.precision === precisionForRegion(foundCount + 1) ? save.precision : inferredPrecision;
+  previousDistanceBand = null;
+  stepDistance = 0;
+  lastNamedRegion = -1;
+  lastSaveAt = performance.now();
+  for (const id of ['message', 'precision-toast', 'boundary-hint', 'region-notice']) $(id).hidden = true;
+  $('mapn').textContent = fmt(N - foundCount * (PEOPLE_PER_REGION - 1)) + ' 人';
+  $('distance').textContent = '';
+  updateMission();
+  if (landing) $('objective').textContent = '即将跳伞降落';
+  else rebuildDetail(true);
+  playing = true;
+  $('game-menu').hidden = true;
+  startGameAudio();
+  saveGame();
+}
+
+$('btn-start').addEventListener('click', () => {
+  if (savedGame && !window.confirm('开始新游戏会覆盖本地存档。确定开始吗？')) return;
+  beginGame(null);
+});
+$('btn-continue').addEventListener('click', () => { if (savedGame) beginGame(savedGame); });
+$('btn-exit').addEventListener('click', () => {
+  saveGame();
+  playing = false;
+  for (const key of Object.keys(keys)) keys[key] = false;
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+  suspendGameAudio();
+  showGameMenu();
+});
+addEventListener('pagehide', saveGame);
+
+function stepRegionNotice(t) {
+  if (t >= regionNoticeUntil) $('region-notice').hidden = true;
+  if (landing) return;
+  const region = regionAt(cam.pos[0], cam.pos[2]);
+  if (region === lastNamedRegion) return;
+  lastNamedRegion = region;
+  const name = namedRegions.get(region);
+  $('region-notice').hidden = !name;
+  if (name) {
+    $('region-notice').textContent = name;
+    regionNoticeUntil = t + 2500;
+  }
+  saveGame();
+}
 const abuseThemes = [
   { name: '群体起哄', remarks: ['大家都这么说，就你不认。', '都在笑你，你还当真？', '跟着说两句而已。'], reply: '人多，也不能把伤害说成对。' },
   { name: '外貌羞辱', remarks: ['这张照片你也敢发？', '你的样子就够人笑了。', '先照照镜子，再发言吧。'], reply: '你有权被尊重，无论你长什么样。' },
@@ -1327,6 +1396,7 @@ function stepMission(t) {
       playRangeSound(t, true);
       $('precision-toast').hidden = false;
       precisionToastUntil = t + 2600;
+      saveGame();
     }
   }
   const chord = Math.sqrt(chord2(playerPoint(), currentFriend.ground));
@@ -1354,6 +1424,7 @@ function stepMission(t) {
     currentFriend = foundCount < regionRoute.length ? makeFriend(regionRoute[foundCount]) : null;
     rebuildDetail(true);
     updateMission();
+    saveGame();
   }
   if (foundCount && currentFriend) {
     const nextChord = Math.sqrt(chord2(playerPoint(), currentFriend.ground));
@@ -1684,19 +1755,28 @@ resize();
 let last = performance.now(), acc = 0, frames = 0, fps = 0, msAvg = 0;
 
 function frame(t) {
+  if (!playing) {
+    last = t;
+    requestAnimationFrame(frame);
+    return;
+  }
   const elapsed = Math.max(0, (t - last) / 1000) || 0.016;
   const dt = Math.min(0.06, elapsed);
   last = t;
   scheduleMusic();
   moveCam(dt, t);
+  stepRegionNotice(t);
   stepMission(t);
+  if (t - lastSaveAt >= 1500) {
+    lastSaveAt = t;
+    saveGame();
+  }
   rebuildDetail(false);
   stepCollision();
 
   const aspect = W2 / H2;
   const eye = camEye();
-  // 第三人称用稍大的视野。
-  const fovUse = camDist > 0.01 ? 70 * Math.PI / 180 : cam.fov;
+  const fovUse = cam.fov;
   const proj = m4perspective(fovUse, aspect, 0.5, Math.max(40000, cam.pos[1] + 3 * R));
   const view = camView();
   const vp = new Float32Array(16);
@@ -1851,30 +1931,6 @@ function frame(t) {
     gl.depthMask(true);
     gl.disable(gl.BLEND);
     calls++;
-  }
-
-  if (avatarVao && camDist > 0.01 && cam.pos[1] < 400) {
-    const b = camBasis();
-    const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
-    const X = [b.e[0] * cy - b.nn[0] * sy, b.e[1] * cy - b.nn[1] * sy, b.e[2] * cy - b.nn[2] * sy];
-    const Z = [b.e[0] * sy + b.nn[0] * cy, b.e[1] * sy + b.nn[1] * cy, b.e[2] * sy + b.nn[2] * cy];
-    const P = plyNow;
-    _amat[0] = X[0]; _amat[1] = X[1]; _amat[2] = X[2]; _amat[3] = 0;
-    _amat[4] = b.n[0]; _amat[5] = b.n[1]; _amat[6] = b.n[2]; _amat[7] = 0;
-    _amat[8] = Z[0]; _amat[9] = Z[1]; _amat[10] = Z[2]; _amat[11] = 0;
-    _amat[12] = P[0]; _amat[13] = P[1]; _amat[14] = P[2]; _amat[15] = 1;
-    const amvp = new Float32Array(16);
-    m4mul(amvp, vp, _amat);
-    gl.useProgram(PROG_AVATAR.p);
-    gl.uniformMatrix4fv(PROG_AVATAR.u.u_mvp, false, amvp);
-    gl.uniform3fv(PROG_AVATAR.u.u_cam, eye);
-    gl.uniform3fv(PROG_AVATAR.u.u_fog, FOGV);
-    gl.uniform3fv(PROG_AVATAR.u.u_world, P);
-    gl.uniform3f(PROG_AVATAR.u.u_tint, 0.62, 0.34, 0.26);
-    gl.uniform3fv(PROG_AVATAR.u.u_ply, plyNow);
-    gl.bindVertexArray(avatarVao);
-    gl.drawArrays(gl.TRIANGLES, 0, meshVertCount);
-    gl.bindVertexArray(null);
   }
 
   frames++; acc += elapsed; msAvg = msAvg * 0.9 + elapsed * 1000 * 0.1;
@@ -2072,6 +2128,8 @@ async function boot() {
   gl.bindBuffer(gl.ARRAY_BUFFER, push);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(3), gl.STATIC_DRAW);
   friendVao = crowdVao(closeMeshVbo, 0, friendBuffer, push);
+  savedGame = readSave();
+  showGameMenu();
   $('loading').classList.add('hide');
   requestAnimationFrame(frame);
   window.__ready = true;
