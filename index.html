@@ -84,6 +84,13 @@
 #game-menu button:disabled { opacity: .48; cursor: default; }
 #menu-status { color: #efd1a1; margin: 0; }
 #btn-exit { pointer-events: auto; margin-left: 6px; font-size: 12px; }
+#player-stats { position: absolute; z-index: 4; left: 50%; top: 20%; transform: translateX(-50%); width: min(330px, 88vw); box-sizing: border-box; padding: 16px 18px; border: 1px solid #a8bcc97d; border-radius: 12px; background: #142131f7; color: #f4fbff; box-shadow: 0 10px 36px #0006; pointer-events: none; }
+#player-stats h2 { margin: 0 0 10px; font-size: 17px; }
+#player-stats h2 kbd { float: right; }
+#player-stats dl { display: grid; grid-template-columns: 1fr auto; gap: 9px 14px; margin: 0; }
+#player-stats dt { color: #b9ccd7; }
+#player-stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+#orbit-controls { position: absolute; left: 50%; bottom: 12%; transform: translateX(-50%); max-width: 88vw; width: max-content; padding: 8px 14px; border-radius: 8px; background: #142131ec; color: #f4fbff; text-align: center; pointer-events: none; }
 #region-notice { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 2; width: max-content; max-width: 90vw; box-sizing: border-box; padding: 12px 20px; border: 1px solid #e7bd79; border-radius: 10px; background: #142131ed; color: #ffe5b5; text-align: center; pointer-events: none; font-size: clamp(17px, 4vw, 26px); font-weight: 650; }
 #btn-audio { pointer-events: auto; font-size: 12px; }
 #mission > * { margin: 0 0 8px; }
@@ -122,7 +129,7 @@
 <div class="panel" id="title">
   <h1>在一亿人中寻找声援者</h1>
   <p>点击画面控制视角，按 <kbd>Esc</kbd> 释放鼠标。</p>
-  <p id="keys"><kbd>W A S D</kbd> 移动 <kbd>空格</kbd> 跳跃<br>
+  <p id="keys"><kbd>W A S D</kbd> 移动 <kbd>空格</kbd> 跳跃 <kbd>Tab</kbd> 属性 <kbd>M</kbd> 升空<br>
     <kbd>R</kbd> 返回初始区域</p>
 </div>
 
@@ -138,6 +145,17 @@
 <aside id="message" role="status" hidden><strong>声援者</strong><p id="friend-quote"></p></aside>
 <div id="boundary-hint" role="status" hidden></div>
 
+<p id="orbit-controls" hidden><kbd>滚轮</kbd> 调整高度 <kbd>M</kbd> 落地</p>
+<aside id="player-stats" aria-labelledby="player-stats-title" hidden>
+  <h2 id="player-stats-title">玩家属性 <kbd>Tab</kbd></h2>
+  <dl>
+    <dt>行走速度</dt><dd id="stat-walk"></dd>
+    <dt>当前移动档位</dt><dd id="stat-movement"></dd>
+    <dt>跳跃高度</dt><dd id="stat-jump"></dd>
+    <dt>声援光探测距离</dt><dd id="stat-detection"></dd>
+    <dt>距离指示器</dt><dd id="stat-indicator"></dd>
+  </dl>
+</aside>
 <div id="region-notice" role="status" hidden></div>
 <div id="game-menu" hidden>
   <section aria-labelledby="menu-title">
@@ -581,6 +599,8 @@ in vec2 v_uv;
 in vec3 v_wp;
 uniform vec3 u_cam;
 uniform vec3 u_sun;
+uniform sampler2D u_completed_regions;
+uniform bool u_orbit_view;
 out vec4 o;
 vec3 regionColor(vec2 uv){
   vec2 cell = clamp(floor(uv * float(${NCH})), vec2(0.0), vec2(float(${NCH - 1})));
@@ -609,8 +629,16 @@ void main(){
   vec3 vd = normalize(u_cam - v_wp);
   float rim = pow(1.0 - abs(dot(vd, n)), 3.0);
   col += vec3(0.085, 0.115, 0.195) * rim * max(sh, 0.25);
+  if (u_orbit_view) {
+    ivec2 cell = ivec2(clamp(floor(g2), vec2(0.0), vec2(float(${NCH - 1}))));
+    if (texelFetch(u_completed_regions, cell, 0).r > 0.5) {
+      vec2 inset = min(fract(g2), 1.0 - fract(g2));
+      float edge = 1.0 - smoothstep(0.025, 0.10, min(inset.x, inset.y));
+      col = vec3(0.88, 0.59, 0.25) + vec3(0.12, 0.25, 0.35) * edge;
+    }
+  }
   o = vec4(col, 1.0);
-}`, ['u_vp', 'u_cam', 'u_sun']);
+}`, ['u_vp', 'u_cam', 'u_sun', 'u_completed_regions', 'u_orbit_view']);
 
 // 在人形网格外再叠加一层柔光，让光线溢出轮廓。
 const PROG_FRIEND_AURA = program(`#version 300 es
@@ -702,12 +730,18 @@ void main(){
 }`, ['u_vp', 'u_cam', 'u_sun', 'u_scale']);
 
 /* ---------------- 相机：经度坐标、海拔、纬度坐标 ---------------- */
-const DEF = { pos: [100 * PLANET_SCALE, 1.7, 300 * PLANET_SCALE], yaw: Math.PI, pitch: -0.06 };
+const DEF = { pos: [100 * PLANET_SCALE, 1.7, 100 * PLANET_SCALE], yaw: Math.PI, pitch: -0.06 };
 const WALK_SPEED = 8;
 const RUN_SPEED = 17;
 const JUMP_SPEED = 5.1;
 const JUMP_GRAVITY = 13;
+const SUPPORTER_COLLISION_RADIUS = 1;
+const SUPPORTER_DETECTION_RADIUS = 48;
+const DISTANCE_INDICATOR_LIMIT = 300;
 let jumpVelocity = 0;
+const ORBIT_LANDING_HEIGHT = 32;
+const ORBIT_DESCENT_DURATION = 780;
+let orbitView = null;
 
 const INTRO_DURATION = 4550;
 const INTRO_OVERVIEW = 680;
@@ -869,6 +903,31 @@ function scheduleMusic() {
   musicPhrase++;
 }
 
+function playJumpSound(landed) {
+  if (!audioIsPlaying()) return;
+  if (landed) {
+    playFootstep();
+    return;
+  }
+  const { ctx, effects } = gameAudio;
+  const now = ctx.currentTime;
+  const puff = ctx.createBufferSource();
+  puff.buffer = gameAudio.grit;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(430, now);
+  filter.frequency.exponentialRampToValueAtTime(890, now + 0.10);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.17, now + 0.025);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+  puff.connect(filter);
+  filter.connect(gain);
+  gain.connect(effects);
+  puff.start(now);
+  puff.stop(now + 0.145);
+}
+
 function playFootstep() {
   if (!audioIsPlaying()) return;
   const { ctx, effects, grit } = gameAudio;
@@ -917,6 +976,19 @@ let showDeveloperBeam = false;
 addEventListener('keydown', (e) => {
   if (!playing) return;
   if (!e.repeat && (e.target !== $('btn-audio') || (e.code !== 'Space' && e.code !== 'Enter'))) startGameAudio();
+  if (e.code === 'KeyM') {
+    if (!e.repeat) toggleOrbitView(performance.now());
+    return;
+  }
+  if (e.code === 'Tab') {
+    e.preventDefault();
+    if (!e.repeat) {
+      const stats = $('player-stats');
+      stats.hidden = !stats.hidden;
+      if (!stats.hidden) updatePlayerStats();
+    }
+    return;
+  }
   if (e.code === 'KeyB' && !e.repeat) showDeveloperBeam = !showDeveloperBeam;
   if (e.code === 'Space') {
     if (document.pointerLockElement !== canvas && e.target instanceof HTMLButtonElement) return;
@@ -926,7 +998,7 @@ addEventListener('keydown', (e) => {
   }
   keys[e.code] = true;
   if (e.code.startsWith('Arrow')) e.preventDefault();
-  if (e.code === 'KeyR' && !landing) jumpCamera(DEF.pos, DEF.yaw, DEF.pitch);
+  if (e.code === 'KeyR' && !landing && !orbitView) jumpCamera(DEF.pos, DEF.yaw, DEF.pitch);
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 canvas.addEventListener('click', () => {
@@ -937,7 +1009,7 @@ canvas.addEventListener('click', () => {
 addEventListener('mousemove', (e) => {
   if (landing || document.pointerLockElement !== canvas) return;
   cam.yaw += e.movementX * 0.0023;
-  cam.pitch = clamp(cam.pitch - e.movementY * 0.0023, -1.45, 1.45);
+  if (!orbitView) cam.pitch = clamp(cam.pitch - e.movementY * 0.0023, -1.45, 1.45);
 });
 document.addEventListener('pointerlockchange', () => {
   const on = document.pointerLockElement === canvas;
@@ -946,14 +1018,70 @@ document.addEventListener('pointerlockchange', () => {
 
 });
 
+addEventListener('wheel', (e) => {
+  if (!playing || !orbitView || orbitView.descentAt !== undefined || e.ctrlKey) return;
+  e.preventDefault();
+  const delta = e.deltaY * (e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 400 : 1);
+  const altitude = cam.pos[1] * Math.exp(clamp(delta, -250, 250) * 0.003);
+  if (altitude <= ORBIT_LANDING_HEIGHT) beginOrbitDescent(performance.now());
+  else cam.pos[1] = Math.min(R * 9, altitude);
+}, { passive: false });
+
+function toggleOrbitView(t) {
+  if (landing) return;
+  if (orbitView) {
+    beginOrbitDescent(t);
+    return;
+  }
+  orbitView = { yaw: cam.yaw, pitch: cam.pitch };
+  jumpVelocity = 0;
+  stepDistance = 0;
+  cam.pos[1] = R * 0.52;
+  cam.pitch = -Math.PI / 2;
+  $('orbit-controls').hidden = false;
+}
+
+function beginOrbitDescent(t) {
+  if (orbitView.descentAt !== undefined) return;
+  orbitView.descentAt = t;
+  orbitView.altitude = cam.pos[1];
+  $('orbit-controls').hidden = true;
+}
+
+function stepOrbitView(t) {
+  if (orbitView.descentAt === undefined) return;
+  const progress = clamp((t - orbitView.descentAt) / ORBIT_DESCENT_DURATION, 0, 1);
+  const drop = progress * progress * (2 - progress);
+  cam.pos[1] = orbitView.altitude * (DEF.pos[1] / orbitView.altitude) ** drop;
+  cam.pitch = -Math.PI / 2 + (orbitView.pitch + Math.PI / 2) * smoothstep(0.54, 1, progress);
+  if (progress === 1) {
+    cam.pos[1] = DEF.pos[1];
+    cam.yaw = orbitView.yaw;
+    cam.pitch = orbitView.pitch;
+    orbitView = null;
+  }
+}
+
 function movementSpeed(region = regionAt(cam.pos[0], cam.pos[2])) {
   return completedRegions[region] ? RUN_SPEED : WALK_SPEED;
 }
 
+function updatePlayerStats() {
+  const speed = movementSpeed();
+  $('stat-walk').textContent = WALK_SPEED + ' 米/秒';
+  $('stat-movement').textContent = landing ? '降落中' : orbitView ? '高空俯瞰' :
+    (speed === RUN_SPEED ? '奔跑' : '步行') + ' · ' + speed + ' 米/秒';
+  $('stat-jump').textContent = (JUMP_SPEED ** 2 / (2 * JUMP_GRAVITY)).toFixed(1) + ' 米';
+  $('stat-detection').textContent = SUPPORTER_DETECTION_RADIUS + ' 米';
+  $('stat-indicator').textContent = !foundCount || !currentFriend ? '未启用' :
+    distancePrecision + ' 米一档 · 上限 ' + DISTANCE_INDICATOR_LIMIT + ' 米';
+}
+
 function startJump() {
-  if (!playing || landing || jumpVelocity !== 0 || cam.pos[1] > DEF.pos[1]) return;
+  if (!playing || landing || orbitView || jumpVelocity !== 0 || cam.pos[1] > DEF.pos[1]) return;
   jumpVelocity = JUMP_SPEED;
   stepDistance = 0;
+  playJumpSound(false);
 }
 
 function stepJump(dt) {
@@ -963,10 +1091,28 @@ function stepJump(dt) {
   if (cam.pos[1] <= DEF.pos[1]) {
     cam.pos[1] = DEF.pos[1];
     jumpVelocity = 0;
+    playJumpSound(true);
   }
 }
 
+function crossesSupporterRadius(from, to, ground) {
+  const dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+  const sx = ground[0] - from[0], sy = ground[1] - from[1], sz = ground[2] - from[2];
+  const along = sx * dx + sy * dy + sz * dz;
+  const startDistance = sx * sx + sy * sy + sz * sz;
+  const radiusSquared = SUPPORTER_COLLISION_RADIUS ** 2;
+  // 旧存档若恰好在碰撞圈内，允许玩家往外走。
+  if (startDistance < radiusSquared) return along > 0;
+  const lengthSquared = dx * dx + dy * dy + dz * dz;
+  const step = lengthSquared ? clamp(along / lengthSquared, 0, 1) : 0;
+  return (sx - dx * step) ** 2 + (sy - dy * step) ** 2 + (sz - dz * step) ** 2 < radiusSquared;
+}
+
 function moveCam(dt, t) {
+  if (orbitView) {
+    stepOrbitView(t);
+    return;
+  }
   if (landing) {
     introStart ??= t;
     const elapsed = t - introStart;
@@ -1016,6 +1162,12 @@ function moveCam(dt, t) {
       hint.hidden = false;
       boundaryUntil = t + 1800;
       return;
+    }
+    const from = n.map(value => value * R);
+    const to = next.map(value => value * R);
+    if (currentFriend && crossesSupporterRadius(from, to, currentFriend.ground)) return;
+    for (const friend of foundFriends) {
+      if (crossesSupporterRadius(from, to, friend.ground)) return;
     }
     cam.pos[0] = x;
     cam.pos[2] = z;
@@ -1277,7 +1429,7 @@ function regionAt(x, z) {
   return row * NCH + column;
 }
 
-function buildRegionRoute(initialRegion) {
+function buildLegacyRoute(initialRegion) {
   const route = [];
   // 蛇形走过第 1 至 99 列，再用第 0 列接回起点，形成沿边相邻的闭环。
   for (let row = 0; row < NCH; row++) {
@@ -1290,20 +1442,60 @@ function buildRegionRoute(initialRegion) {
   return route.slice(start).concat(route.slice(0, start));
 }
 
+function buildSpiralRoute(initialRegion) {
+  let x = initialRegion % NCH, z = Math.floor(initialRegion / NCH);
+  const route = [initialRegion];
+  const directions = [[-1, 0], [0, -1], [1, 0], [0, 1]];
+  for (let leg = 0; route.length < REGION_COUNT; leg++) {
+    const [dx, dz] = directions[leg % directions.length];
+    for (let step = 0; step < Math.floor(leg / 2) + 1; step++) {
+      x += dx;
+      z += dz;
+      if (x >= 0 && x < NCH && z >= 0 && z < NCH) route.push(z * NCH + x);
+    }
+  }
+  return route;
+}
+
 function precisionForRegion(number) {
   return number < 3 ? 100 : Math.max(20, 50 - (number - 3) * 10);
 }
 
 function distanceBand(meters, precision = distancePrecision) {
-  return clamp(Math.ceil(meters / precision) * precision, precision, 300);
+  return clamp(Math.ceil(meters / precision) * precision, precision, DISTANCE_INDICATOR_LIMIT);
 }
 
-const regionRoute = buildRegionRoute(regionAt(DEF.pos[0], DEF.pos[2]));
+const spiralRoute = buildSpiralRoute(regionAt(DEF.pos[0], DEF.pos[2]));
+const legacyRoute = buildLegacyRoute(regionAt(100 * PLANET_SCALE, 300 * PLANET_SCALE));
+let regionRoute = spiralRoute;
+let legacyFound = 0;
 const completedRegions = new Uint8Array(REGION_COUNT);
+const completedPixels = new Uint8Array(REGION_COUNT);
+const completedTexture = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, completedTexture);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NCH, NCH, 0, gl.RED, gl.UNSIGNED_BYTE, completedPixels);
+
+function uploadCompletedRegions() {
+  for (let region = 0; region < REGION_COUNT; region++) completedPixels[region] = completedRegions[region] * 255;
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, completedTexture);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NCH, NCH, gl.RED, gl.UNSIGNED_BYTE, completedPixels);
+}
 const FRIEND_CLEARING_RADIUS = 6.4;
 const friendLocations = new Array(REGION_COUNT);
 const regionNames = ['众声广场', '镜像街区', '猜疑小径', '评判之地', '归咎回廊', '断章之境'];
-const namedRegions = new Map(regionRoute.slice(0, regionNames.length).map((id, i) => [id, regionNames[i]]));
+const namedRegions = new Map();
+function configureRegionRoute(count) {
+  legacyFound = count;
+  const cleared = legacyRoute.slice(0, count);
+  const alreadyCleared = new Set(cleared);
+  regionRoute = count ? cleared.concat(spiralRoute.filter(region => !alreadyCleared.has(region))) : spiralRoute;
+  namedRegions.clear();
+  regionRoute.slice(0, regionNames.length).forEach((region, i) => namedRegions.set(region, regionNames[i]));
+  regionRoute.forEach((region, i) => { regionThemes[region] = i % abuseThemes.length; });
+}
 const SAVE_KEY = 'planet-kindness-save-v1';
 let playing = false;
 let savedGame;
@@ -1315,14 +1507,16 @@ let lastNamedRegion = -1;
 function readSave() {
   try {
     const save = JSON.parse(localStorage.getItem(SAVE_KEY));
-    if (!save || ![1, 2, 3].includes(save.version) || !Number.isInteger(save.found) || save.found < 0 ||
+    if (!save || ![1, 2, 3, 4].includes(save.version) || !Number.isInteger(save.found) || save.found < 0 ||
         save.found > REGION_COUNT || typeof save.landed !== 'boolean' ||
         ![save.x, save.z, save.yaw, save.pitch].every(Number.isFinite)) return null;
     const previousScale = save.version === 1 ? 1 : save.version === 2 ? 5 : PLANET_SCALE;
     const scale = PLANET_SCALE / previousScale;
     const x = save.x * scale, z = save.z * scale;
     if (Math.abs(x) > HALF || Math.abs(z) > HALF) return null;
-    return { ...save, version: 3, x, z };
+    const legacy = save.version < 4 ? save.found : save.legacyFound;
+    if (!Number.isInteger(legacy) || legacy < 0 || legacy > save.found) return null;
+    return { ...save, version: 4, legacyFound: legacy, x, z };
   } catch {
     return null;
   }
@@ -1331,8 +1525,8 @@ function readSave() {
 function saveGame() {
   if (!playing) return;
   savedGame = {
-    version: 3, population: peoplePerRegion, found: foundCount, landed: !landing, precision: distancePrecision, x: cam.pos[0], z: cam.pos[2],
-    yaw: cam.yaw, pitch: cam.pitch
+    version: 4, legacyFound, population: peoplePerRegion, found: foundCount, landed: !landing, precision: distancePrecision, x: cam.pos[0], z: cam.pos[2],
+    yaw: orbitView?.yaw ?? cam.yaw, pitch: orbitView?.pitch ?? cam.pitch
   };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(savedGame));
@@ -1369,6 +1563,8 @@ function beginGame(save) {
     buildPopulationBuffers();
   }
   foundCount = save?.found ?? 0;
+  configureRegionRoute(save?.legacyFound ?? 0);
+  orbitView = null;
   landing = !save?.landed;
   introStart = undefined;
   jumpVelocity = 0;
@@ -1390,6 +1586,7 @@ function beginGame(save) {
     friend.glow = 1;
     foundFriends.push(friend);
   }
+  uploadCompletedRegions();
   for (let region = 0; region < REGION_COUNT; region++) {
     const alpha = completedRegions[region] ? 0 : 255;
     for (let j = pointStarts[region] * 4 + 3; j < pointStarts[region + 1] * 4; j += 4) pointColors[j] = alpha;
@@ -1404,7 +1601,7 @@ function beginGame(save) {
   stepDistance = 0;
   lastNamedRegion = -1;
   lastSaveAt = performance.now();
-  for (const id of ['message', 'precision-toast', 'boundary-hint', 'region-notice']) $(id).hidden = true;
+  for (const id of ['message', 'precision-toast', 'boundary-hint', 'region-notice', 'player-stats', 'orbit-controls']) $(id).hidden = true;
   $('mapn').textContent = fmt(planetPopulation() - foundCount * (peoplePerRegion - 1)) + ' 人';
   $('distance').textContent = '';
   updateMission();
@@ -1424,6 +1621,9 @@ $('btn-continue').addEventListener('click', () => { if (savedGame) beginGame(sav
 $('btn-exit').addEventListener('click', () => {
   saveGame();
   playing = false;
+  orbitView = null;
+  $('orbit-controls').hidden = true;
+  $('player-stats').hidden = true;
   for (const key of Object.keys(keys)) keys[key] = false;
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   suspendGameAudio();
@@ -1433,7 +1633,7 @@ addEventListener('pagehide', saveGame);
 
 function stepRegionNotice(t) {
   if (t >= regionNoticeUntil) $('region-notice').hidden = true;
-  if (landing) return;
+  if (landing || orbitView) return;
   const region = regionAt(cam.pos[0], cam.pos[2]);
   if (region === lastNamedRegion) return;
   lastNamedRegion = region;
@@ -1455,7 +1655,7 @@ const abuseThemes = [
 ];
 let boundaryUntil = 0;
 const regionThemes = new Uint8Array(REGION_COUNT);
-regionRoute.forEach((region, index) => { regionThemes[region] = index % abuseThemes.length; });
+configureRegionRoute(0);
 let foundCount = 0;
 let distancePrecision = 100;
 let precisionToastUntil = 0;
@@ -1545,8 +1745,7 @@ function stepMission(t) {
   if (t >= precisionToastUntil) $('precision-toast').hidden = true;
   if (t >= boundaryUntil) $('boundary-hint').hidden = true;
   if (t >= messageUntil) $('message').hidden = true;
-  if (landing) return;
-  if (!currentFriend) return;
+  if (landing || orbitView || !currentFriend) return;
   if (regionAt(cam.pos[0], cam.pos[2]) === currentFriend.region) {
     const precision = precisionForRegion(foundCount + 1);
     if (precision < distancePrecision) {
@@ -1560,12 +1759,13 @@ function stepMission(t) {
   }
   const chord = Math.sqrt(chord2(playerPoint(), currentFriend.ground));
   const meters = 2 * R * Math.asin(Math.min(1, chord / (2 * R)));
-  currentFriend.glow = 1 - smoothstep(2.3, 48, meters);
+  currentFriend.glow = 1 - smoothstep(2.3, SUPPORTER_DETECTION_RADIUS, meters);
   if (meters <= 15) currentFriend.jumpAt ??= t;
   if (meters <= 8) currentFriend.waveAt ??= t;
   if (meters <= 2.3 && regionAt(cam.pos[0], cam.pos[2]) === currentFriend.region) {
     const region = currentFriend.region;
     completedRegions[region] = 1;
+    uploadCompletedRegions();
     currentFriend.glow = 1;
     foundFriends.push(currentFriend);
     const first = pointStarts[region] * 4;
@@ -1980,12 +2180,13 @@ function frame(t) {
   moveCam(dt, t);
   stepRegionNotice(t);
   stepMission(t);
+  if (!$('player-stats').hidden) updatePlayerStats();
   if (t - lastSaveAt >= 1500) {
     lastSaveAt = t;
     saveGame();
   }
   rebuildDetail(false);
-  stepCollision();
+  if (!orbitView) stepCollision();
 
   const aspect = W2 / H2;
   const eye = camEye();
@@ -2024,6 +2225,10 @@ function frame(t) {
   gl.uniformMatrix4fv(PROG_GROUND.u.u_vp, false, vp);
   gl.uniform3fv(PROG_GROUND.u.u_cam, eye);
   gl.uniform3fv(PROG_GROUND.u.u_sun, SUN);
+  gl.uniform1i(PROG_GROUND.u.u_orbit_view, Number(orbitView !== null));
+  gl.uniform1i(PROG_GROUND.u.u_completed_regions, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, completedTexture);
   gl.bindVertexArray(groundVao);
   gl.drawElements(gl.TRIANGLES, groundIdxCount, gl.UNSIGNED_INT, 0);
   gl.bindVertexArray(null);
@@ -2191,7 +2396,7 @@ function drawCrowdBubbles(vp, t) {
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   const width = W2 / dpr, height = H2 / dpr;
   c.clearRect(0, 0, width, height);
-  if (landing) return;
+  if (landing || orbitView) return;
 
   const candidates = [];
   for (const group of detailMeta) {
